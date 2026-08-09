@@ -432,14 +432,20 @@ def panel_unificado():
   .badge-ok { color: var(--long); font-weight: 700; }
   .badge-off { color: var(--text-muted); }
 
+  #tabla-vivo {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 0.6rem;
+  }
   .grupo-activo {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 1.1rem 1.2rem; margin-bottom: 0.9rem;
+    border-radius: 8px; padding: 0.6rem 0.65rem;
   }
   .grupo-activo-titulo {
-    font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.98rem;
-    color: var(--accent); margin-bottom: 0.6rem; letter-spacing: 0.02em;
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.82rem;
+    color: var(--accent); margin-bottom: 0.4rem; letter-spacing: 0.02em;
   }
+  .grupo-activo table { font-size: 0.68rem; }
+  .grupo-activo th, .grupo-activo td { padding: 0.25rem 0.25rem; }
+  .grupo-activo th { font-size: 0.6rem; }
 
   .mobile-tabs { display: none; }
 
@@ -755,7 +761,7 @@ async function cargarEstadoVivo() {
       html += `<div class="grupo-activo">
                  <div class="grupo-activo-titulo">${symbol}</div>
                  <table>
-                   <tr><th>TF</th><th>Long T1</th><th>Short T1</th><th>Long T2</th><th>Short T2</th><th>Hace</th></tr>`;
+                   <tr><th>TF</th><th>L1</th><th>S1</th><th>L2</th><th>S2</th><th>&Delta;</th></tr>`;
       for (const p of grupos[symbol]) {
         const antiguo = p.actualizado_hace_segundos > 180;
         html += `<tr style="${antiguo ? 'opacity:0.4' : ''}">
