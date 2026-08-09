@@ -258,10 +258,10 @@ def recibir_indicadores(payload: IndicadoresPayload):
 
 
 @app.get("/upload", response_class=HTMLResponse)
-def pagina_upload():
+def panel_unificado():
     """
-    Pagina simple para subir el CSV de historico arrastrando y
-    soltando el archivo, sin necesitar terminal ni curl. Accesible
+    Panel unico: subir historico, ver que hay cargado, y correr el
+    backtest - todo en la misma pagina, sin cambiar de URL. Accesible
     desde cualquier navegador (incluido el celular) apuntando a
     https://TU-URL.up.railway.app/upload
     """
@@ -271,57 +271,102 @@ def pagina_upload():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UPS - Subir historico</title>
+<title>UPS - Panel de historico y backtesting</title>
 <style>
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0;
-         display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-  .card { background: #1e293b; padding: 2rem; border-radius: 16px; width: 90%; max-width: 480px; }
-  h1 { font-size: 1.3rem; margin-bottom: 1.5rem; }
-  label { display: block; margin: 0.8rem 0 0.3rem; font-size: 0.9rem; color: #94a3b8; }
+         margin: 0; padding: 1.5rem 1rem; }
+  .contenedor { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.2rem; }
+  .card { background: #1e293b; padding: 1.5rem; border-radius: 16px; }
+  h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 1rem; color: #38bdf8; }
+  label { display: block; margin: 0.8rem 0 0.3rem; font-size: 0.85rem; color: #94a3b8; }
   input[type=text] { width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid #334155;
-                      background: #0f172a; color: #e2e8f0; box-sizing: border-box; }
-  #drop { border: 2px dashed #475569; border-radius: 12px; padding: 2rem 1rem; text-align: center;
-          margin-top: 1rem; cursor: pointer; transition: 0.2s; }
+                      background: #0f172a; color: #e2e8f0; box-sizing: border-box; font-size: 1rem; }
+  #drop { border: 2px dashed #475569; border-radius: 12px; padding: 1.5rem 1rem; text-align: center;
+          margin-top: 0.8rem; cursor: pointer; transition: 0.2s; }
   #drop.hover { border-color: #38bdf8; background: #17263c; }
-  #drop p { margin: 0; color: #94a3b8; }
+  #drop p { margin: 0; color: #94a3b8; font-size: 0.9rem; }
   #archivo { display: none; }
-  button { width: 100%; margin-top: 1.2rem; padding: 0.7rem; border: none; border-radius: 8px;
+  button { width: 100%; margin-top: 1rem; padding: 0.7rem; border: none; border-radius: 8px;
            background: #38bdf8; color: #0f172a; font-weight: 600; cursor: pointer; font-size: 1rem; }
+  button.secundario { background: #334155; color: #e2e8f0; }
   button:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
-  #estado { margin-top: 1rem; font-size: 0.9rem; text-align: center; }
+  #estado-upload, #estado-backtest { margin-top: 0.8rem; font-size: 0.85rem; text-align: center; }
   .ok { color: #4ade80; } .error { color: #f87171; }
+  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid #334155; }
+  th { color: #94a3b8; font-weight: 500; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: #17263c; }
+  .vacio { color: #64748b; font-size: 0.85rem; text-align: center; padding: 1rem 0; }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-top: 0.8rem; }
+  .stat-box { background: #0f172a; border-radius: 10px; padding: 0.8rem; }
+  .stat-box h3 { margin: 0 0 0.5rem; font-size: 0.9rem; }
+  .stat-box .long h3 { color: #4ade80; }
+  .stat-box .short h3 { color: #f87171; }
+  .stat-row { display: flex; justify-content: space-between; font-size: 0.82rem; padding: 0.15rem 0; color: #cbd5e1; }
+  .stat-row b { color: #e2e8f0; }
+  .refresh { background: none; border: 1px solid #334155; color: #94a3b8; width: auto;
+             padding: 0.35rem 0.7rem; font-size: 0.8rem; margin: 0; float: right; }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>📊 Subir histórico UPS</h1>
+<div class="contenedor">
 
-  <label for="symbol">Símbolo (ej. XAGUSD)</label>
-  <input type="text" id="symbol" placeholder="XAGUSD">
-
-  <label for="timeframe">Timeframe (ej. W1)</label>
-  <input type="text" id="timeframe" placeholder="W1">
-
-  <label>Archivo CSV</label>
-  <div id="drop">
-    <p id="drop-texto">Arrastra el CSV aquí, o toca para elegirlo</p>
-    <input type="file" id="archivo" accept=".csv">
+  <div class="card">
+    <h1>UPS - Historico y Backtesting</h1>
+    <p style="color:#94a3b8; font-size:0.85rem; margin:0;">
+      Todo corre en Railway - no depende de tu PC ni de MT4 abierto.
+    </p>
   </div>
 
-  <button id="btn-subir" disabled>Subir</button>
-  <div id="estado"></div>
+  <!-- SUBIR CSV -->
+  <div class="card">
+    <h2>1. Subir historico (CSV)</h2>
+    <label for="up-symbol">Simbolo</label>
+    <input type="text" id="up-symbol" placeholder="XAGUSD">
+    <label for="up-timeframe">Timeframe</label>
+    <input type="text" id="up-timeframe" placeholder="W1">
+    <label>Archivo CSV</label>
+    <div id="drop">
+      <p id="drop-texto">Arrastra el CSV aqui, o toca para elegirlo</p>
+      <input type="file" id="archivo" accept=".csv">
+    </div>
+    <button id="btn-subir" disabled>Subir</button>
+    <div id="estado-upload"></div>
+  </div>
+
+  <!-- DATOS DISPONIBLES -->
+  <div class="card">
+    <h2>2. Historico cargado <button class="refresh" onclick="cargarDisponibles()">↻ Actualizar</button></h2>
+    <div id="tabla-disponibles"><p class="vacio">Cargando...</p></div>
+  </div>
+
+  <!-- BACKTEST -->
+  <div class="card">
+    <h2>3. Correr backtest</h2>
+    <label for="bt-symbol">Simbolo</label>
+    <input type="text" id="bt-symbol" placeholder="XAGUSD">
+    <label for="bt-timeframe">Timeframe</label>
+    <input type="text" id="bt-timeframe" placeholder="W1">
+    <button id="btn-backtest">Correr backtest</button>
+    <div id="estado-backtest"></div>
+    <div id="resultado-backtest"></div>
+  </div>
+
 </div>
 
 <script>
+// ---------- SUBIR CSV ----------
 const drop = document.getElementById('drop');
 const input = document.getElementById('archivo');
-const btn = document.getElementById('btn-subir');
-const estado = document.getElementById('estado');
+const btnSubir = document.getElementById('btn-subir');
+const estadoUpload = document.getElementById('estado-upload');
 const dropTexto = document.getElementById('drop-texto');
 let archivoSeleccionado = null;
 
 drop.addEventListener('click', () => input.click());
-
 drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('hover'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('hover'));
 drop.addEventListener('drop', (e) => {
@@ -335,23 +380,23 @@ input.addEventListener('change', () => {
 
 function seleccionarArchivo(archivo) {
   archivoSeleccionado = archivo;
-  dropTexto.textContent = "✅ " + archivo.name;
-  btn.disabled = false;
+  dropTexto.textContent = "OK: " + archivo.name;
+  btnSubir.disabled = false;
 }
 
-btn.addEventListener('click', async () => {
-  const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-  const timeframe = document.getElementById('timeframe').value.trim().toUpperCase();
+btnSubir.addEventListener('click', async () => {
+  const symbol = document.getElementById('up-symbol').value.trim().toUpperCase();
+  const timeframe = document.getElementById('up-timeframe').value.trim().toUpperCase();
 
   if (!symbol || !timeframe || !archivoSeleccionado) {
-    estado.textContent = "Completa símbolo, timeframe, y elige un archivo.";
-    estado.className = "error";
+    estadoUpload.textContent = "Completa simbolo, timeframe, y elige un archivo.";
+    estadoUpload.className = "error";
     return;
   }
 
-  btn.disabled = true;
-  estado.textContent = "Subiendo...";
-  estado.className = "";
+  btnSubir.disabled = true;
+  estadoUpload.textContent = "Subiendo...";
+  estadoUpload.className = "";
 
   const formData = new FormData();
   formData.append("archivo", archivoSeleccionado);
@@ -364,25 +409,118 @@ btn.addEventListener('click', async () => {
     const data = await resp.json();
 
     if (resp.ok) {
-      estado.textContent = `✅ ${data.velas_guardadas} velas guardadas para ${data.symbol} ${data.timeframe}`;
-      estado.className = "ok";
-      dropTexto.textContent = "Arrastra el CSV aquí, o toca para elegirlo";
+      estadoUpload.textContent = `OK: ${data.velas_guardadas} velas guardadas para ${data.symbol} ${data.timeframe}`;
+      estadoUpload.className = "ok";
+      dropTexto.textContent = "Arrastra el CSV aqui, o toca para elegirlo";
       archivoSeleccionado = null;
+      cargarDisponibles();
     } else {
-      estado.textContent = "❌ Error: " + (data.detail || "desconocido");
-      estado.className = "error";
+      estadoUpload.textContent = "Error: " + (data.detail || "desconocido");
+      estadoUpload.className = "error";
     }
   } catch (err) {
-    estado.textContent = "❌ Error de conexion: " + err;
-    estado.className = "error";
+    estadoUpload.textContent = "Error de conexion: " + err;
+    estadoUpload.className = "error";
   }
 
-  btn.disabled = false;
+  btnSubir.disabled = false;
 });
+
+// ---------- DATOS DISPONIBLES ----------
+async function cargarDisponibles() {
+  const cont = document.getElementById('tabla-disponibles');
+  cont.innerHTML = '<p class="vacio">Cargando...</p>';
+  try {
+    const resp = await fetch('/historico/disponibles');
+    const data = await resp.json();
+    const filas = data.disponibles || [];
+
+    if (filas.length === 0) {
+      cont.innerHTML = '<p class="vacio">Aun no hay historico cargado.</p>';
+      return;
+    }
+
+    let html = '<table><tr><th>Simbolo</th><th>TF</th><th>Velas</th><th>Rango</th></tr>';
+    for (const f of filas) {
+      html += `<tr class="clickable" onclick="usarEnBacktest('${f.symbol}','${f.timeframe}')">
+                 <td>${f.symbol}</td><td>${f.timeframe}</td><td>${f.velas}</td>
+                 <td>${f.desde} a ${f.hasta}</td></tr>`;
+    }
+    html += '</table><p style="color:#64748b; font-size:0.78rem; margin-top:0.5rem;">Toca una fila para usarla en el backtest de abajo.</p>';
+    cont.innerHTML = html;
+  } catch (err) {
+    cont.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
+  }
+}
+
+function usarEnBacktest(symbol, timeframe) {
+  document.getElementById('bt-symbol').value = symbol;
+  document.getElementById('bt-timeframe').value = timeframe;
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+}
+
+// ---------- BACKTEST ----------
+document.getElementById('btn-backtest').addEventListener('click', async () => {
+  const symbol = document.getElementById('bt-symbol').value.trim().toUpperCase();
+  const timeframe = document.getElementById('bt-timeframe').value.trim().toUpperCase();
+  const estado = document.getElementById('estado-backtest');
+  const resultado = document.getElementById('resultado-backtest');
+
+  if (!symbol || !timeframe) {
+    estado.textContent = "Completa simbolo y timeframe.";
+    estado.className = "error";
+    return;
+  }
+
+  estado.textContent = "Corriendo backtest...";
+  estado.className = "";
+  resultado.innerHTML = "";
+
+  try {
+    const resp = await fetch(`/backtest?symbol=${symbol}&timeframe=${timeframe}`);
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      estado.textContent = "Error: " + (data.detail || "desconocido");
+      estado.className = "error";
+      return;
+    }
+
+    estado.textContent = `${data.symbol} ${data.timeframe} - ${data.total_velas} velas analizadas`;
+    estado.className = "ok";
+
+    const l = data.long_type1, s = data.short_type1;
+    resultado.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-box long">
+          <h3>LONG Type 1</h3>
+          <div class="stat-row"><span>Senales</span><b>${l.total_senales}</b></div>
+          <div class="stat-row"><span>% Acierto</span><b>${l.pct_acierto}%</b></div>
+          <div class="stat-row"><span>Ganados/Perdidos</span><b>${l.ganados}/${l.perdidos}</b></div>
+          <div class="stat-row"><span>Neto (pips)</span><b>${l.resultado_neto_pips}</b></div>
+        </div>
+        <div class="stat-box short">
+          <h3>SHORT Type 1</h3>
+          <div class="stat-row"><span>Senales</span><b>${s.total_senales}</b></div>
+          <div class="stat-row"><span>% Acierto</span><b>${s.pct_acierto}%</b></div>
+          <div class="stat-row"><span>Ganados/Perdidos</span><b>${s.ganados}/${s.perdidos}</b></div>
+          <div class="stat-row"><span>Neto (pips)</span><b>${s.resultado_neto_pips}</b></div>
+        </div>
+      </div>`;
+  } catch (err) {
+    estado.textContent = "Error de conexion: " + err;
+    estado.className = "error";
+  }
+});
+
+// Cargar la lista de disponibles apenas abre la pagina
+cargarDisponibles();
 </script>
 </body>
 </html>
 """
+
+
 
 
 @app.get("/pares-vigilados")

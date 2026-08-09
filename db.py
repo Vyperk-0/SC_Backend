@@ -55,7 +55,7 @@ def _nombre_tabla(symbol: str, timeframe: str) -> str:
     tf_limpio = re.sub(r"[^A-Za-z0-9]", "", timeframe).upper()
     if not symbol_limpio or not tf_limpio:
         raise ValueError("symbol/timeframe invalido (debe tener letras/numeros)")
-    return f"historico_{symbol_limpio}_{tf_limpio}"
+    return f"{symbol_limpio}_{tf_limpio}"
 
 
 def verificar_conexion():
@@ -115,11 +115,30 @@ def guardar_historico(symbol: str, timeframe: str, filas: List[dict]) -> int:
 
     valores = [tuple(f[c] for c in COLUMNAS) for f in filas]
 
+    symbol_limpio = re.sub(r"[^A-Za-z0-9]", "", symbol).upper()
+    tf_limpio = re.sub(r"[^A-Za-z0-9]", "", timeframe).upper()
+
+    registro_crear_sql = """
+        CREATE TABLE IF NOT EXISTS historico_registro (
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            tabla TEXT NOT NULL,
+            PRIMARY KEY (symbol, timeframe)
+        );
+    """
+    registro_insert_sql = """
+        INSERT INTO historico_registro (symbol, timeframe, tabla)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (symbol, timeframe) DO NOTHING;
+    """
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(crear_sql)
             execute_values(cur, insert_sql.as_string(conn), valores)
+            cur.execute(registro_crear_sql)
+            cur.execute(registro_insert_sql, (symbol_limpio, tf_limpio, tabla))
         conn.commit()
     finally:
         conn.close()
@@ -163,28 +182,22 @@ def obtener_historico(symbol: str, timeframe: str) -> List[dict]:
 
 
 def listar_pares_disponibles() -> List[dict]:
-    """Recorre las tablas historico_* existentes y devuelve un resumen
-    de cada una (simbolo, timeframe, cantidad de velas, rango de fechas)."""
+    """Devuelve un resumen (simbolo, timeframe, velas, rango de fechas)
+    de cada par/timeframe registrado en historico_registro."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_name LIKE 'historico\\_%%' ESCAPE '\\'
-                ORDER BY table_name;
+                SELECT symbol, timeframe, tabla FROM historico_registro
+                ORDER BY symbol, timeframe;
             """)
-            tablas = [r[0] for r in cur.fetchall()]
+            registros = cur.fetchall()
 
             resultado = []
-            for t in tablas:
-                partes = t[len("historico_"):].rsplit("_", 1)
-                if len(partes) != 2:
-                    continue
-                symbol, timeframe = partes
-
+            for symbol, timeframe, tabla in registros:
                 cur.execute(sql.SQL(
                     "SELECT COUNT(*), MIN(time), MAX(time) FROM {t};"
-                ).format(t=sql.Identifier(t)))
+                ).format(t=sql.Identifier(tabla)))
                 count, desde, hasta = cur.fetchone()
 
                 resultado.append({
