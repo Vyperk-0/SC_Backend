@@ -289,8 +289,9 @@ def recibir_indicadores(payload: IndicadoresPayload):
 @app.get("/upload", response_class=HTMLResponse)
 def panel_unificado():
     """
-    Panel unico: subir historico, ver que hay cargado, y correr el
-    backtest - todo en la misma pagina, sin cambiar de URL. Accesible
+    Panel de control del sistema UPS: cargar historico, ver que hay
+    disponible, correr backtest, y monitorear el estado en vivo -
+    todo en un solo lugar, con navegacion por pestanas. Accesible
     desde cualquier navegador (incluido el celular) apuntando a
     https://TU-URL.up.railway.app/upload
     """
@@ -300,103 +301,256 @@ def panel_unificado():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UPS - Panel de historico y backtesting</title>
+<title>UPS Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --bg: #0A0E1A;
+    --surface: #12182B;
+    --surface-alt: #1A2238;
+    --border: #232B42;
+    --accent: #E8A33D;
+    --accent-dim: #8A6526;
+    --text: #E6E9F0;
+    --text-muted: #7C8599;
+    --long: #3DDC84;
+    --short: #FF5C5C;
+    --radius: 10px;
+  }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0;
-         margin: 0; padding: 1.5rem 1rem; }
-  .contenedor { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.2rem; }
-  .card { background: #1e293b; padding: 1.5rem; border-radius: 16px; }
-  h1 { font-size: 1.3rem; margin: 0 0 1rem; }
-  h2 { font-size: 1.05rem; margin: 0 0 1rem; color: #38bdf8; }
-  label { display: block; margin: 0.8rem 0 0.3rem; font-size: 0.85rem; color: #94a3b8; }
-  input[type=text] { width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid #334155;
-                      background: #0f172a; color: #e2e8f0; box-sizing: border-box; font-size: 1rem; }
-  #drop { border: 2px dashed #475569; border-radius: 12px; padding: 1.5rem 1rem; text-align: center;
-          margin-top: 0.8rem; cursor: pointer; transition: 0.2s; }
-  #drop.hover { border-color: #38bdf8; background: #17263c; }
-  #drop p { margin: 0; color: #94a3b8; font-size: 0.9rem; }
-  #archivo { display: none; }
-  button { width: 100%; margin-top: 1rem; padding: 0.7rem; border: none; border-radius: 8px;
-           background: #38bdf8; color: #0f172a; font-weight: 600; cursor: pointer; font-size: 1rem; }
-  button.secundario { background: #334155; color: #e2e8f0; }
-  button:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
-  #estado-upload, #estado-backtest { margin-top: 0.8rem; font-size: 0.85rem; text-align: center; }
-  .ok { color: #4ade80; } .error { color: #f87171; }
-  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; }
-  th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid #334155; }
-  th { color: #94a3b8; font-weight: 500; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'Inter', sans-serif; min-height: 100vh;
+  }
+  h1, h2, h3, .display { font-family: 'Space Grotesk', sans-serif; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  .layout { display: flex; min-height: 100vh; }
+
+  /* ---------- SIDEBAR ---------- */
+  .sidebar {
+    width: 220px; flex-shrink: 0; background: var(--surface);
+    border-right: 1px solid var(--border); padding: 1.5rem 1rem;
+    display: flex; flex-direction: column; gap: 0.3rem;
+  }
+  .brand {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.15rem;
+    letter-spacing: 0.02em; margin: 0 0 0.2rem 0.4rem;
+  }
+  .brand span { color: var(--accent); }
+  .brand-sub {
+    font-size: 0.7rem; color: var(--text-muted); margin: 0 0 1.5rem 0.4rem;
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 0.7rem;
+    border-radius: var(--radius); cursor: pointer; color: var(--text-muted);
+    font-size: 0.88rem; font-weight: 500; transition: 0.15s; border: 1px solid transparent;
+  }
+  .nav-item:hover { background: var(--surface-alt); color: var(--text); }
+  .nav-item.activo { background: var(--surface-alt); color: var(--text); border-color: var(--border); }
+  .nav-item .num { font-family: 'JetBrains Mono', monospace; color: var(--accent-dim); font-size: 0.78rem; }
+  .nav-item.activo .num { color: var(--accent); }
+
+  .pulse {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--long);
+    margin-left: auto; box-shadow: 0 0 0 0 rgba(61,220,132,0.6);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(61,220,132,0.55); }
+    70%  { box-shadow: 0 0 0 7px rgba(61,220,132,0); }
+    100% { box-shadow: 0 0 0 0 rgba(61,220,132,0); }
+  }
+
+  /* ---------- MAIN ---------- */
+  .main { flex: 1; padding: 2rem 2.2rem; max-width: 900px; }
+  .panel { display: none; }
+  .panel.activo { display: block; animation: fade 0.25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .panel-header { margin-bottom: 1.5rem; }
+  .panel-header h2 { font-size: 1.4rem; margin: 0 0 0.3rem; }
+  .panel-header p { color: var(--text-muted); font-size: 0.87rem; margin: 0; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.3rem 1.4rem; margin-bottom: 1rem;
+  }
+  .card h3 { font-size: 0.95rem; margin: 0 0 0.9rem; color: var(--text); font-weight: 600; }
+
+  label { display: block; margin: 0.7rem 0 0.35rem; font-size: 0.78rem; color: var(--text-muted); }
+  input[type=text] {
+    width: 100%; padding: 0.6rem 0.7rem; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace;
+    font-size: 0.92rem;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent-dim); }
+
+  #drop {
+    border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 1.8rem 1rem;
+    text-align: center; margin-top: 0.8rem; cursor: pointer; transition: 0.2s;
+  }
+  #drop.hover { border-color: var(--accent); background: rgba(232,163,61,0.05); }
+  #drop p { margin: 0; color: var(--text-muted); font-size: 0.85rem; }
+
+  button {
+    padding: 0.65rem 1.1rem; border: none; border-radius: 8px;
+    background: var(--accent); color: #1A1200; font-weight: 600; cursor: pointer;
+    font-size: 0.88rem; font-family: 'Inter', sans-serif; transition: 0.15s;
+  }
+  button:hover { filter: brightness(1.08); }
+  button:disabled { background: var(--surface-alt); color: var(--text-muted); cursor: not-allowed; }
+  button.ancho { width: 100%; margin-top: 1rem; }
+  button.ghost {
+    background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    padding: 0.35rem 0.7rem; font-size: 0.76rem; margin: 0;
+  }
+
+  #estado-upload, #estado-backtest { margin-top: 0.7rem; font-size: 0.82rem; }
+  .ok { color: var(--long); } .error { color: var(--short); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+  th, td { text-align: left; padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-muted); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  td { font-family: 'JetBrains Mono', monospace; }
   tr.clickable { cursor: pointer; }
-  tr.clickable:hover { background: #17263c; }
-  .vacio { color: #64748b; font-size: 0.85rem; text-align: center; padding: 1rem 0; }
-  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-top: 0.8rem; }
-  .stat-box { background: #0f172a; border-radius: 10px; padding: 0.8rem; }
-  .stat-box h3 { margin: 0 0 0.5rem; font-size: 0.9rem; }
-  .stat-box .long h3 { color: #4ade80; }
-  .stat-box .short h3 { color: #f87171; }
-  .stat-row { display: flex; justify-content: space-between; font-size: 0.82rem; padding: 0.15rem 0; color: #cbd5e1; }
-  .stat-row b { color: #e2e8f0; }
-  .refresh { background: none; border: 1px solid #334155; color: #94a3b8; width: auto;
-             padding: 0.35rem 0.7rem; font-size: 0.8rem; margin: 0; float: right; }
+  tr.clickable:hover td { background: var(--surface-alt); }
+  .vacio { color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 1.5rem 0; }
+
+  .section-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.9rem; }
+
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; margin-top: 1rem; }
+  .stat-box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; }
+  .stat-box h4 { margin: 0 0 0.7rem; font-size: 0.82rem; font-family: 'Space Grotesk', sans-serif; }
+  .stat-box.long h4 { color: var(--long); } .stat-box.short h4 { color: var(--short); }
+  .stat-row { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 0.2rem 0; color: var(--text-muted); }
+  .stat-row b { color: var(--text); font-family: 'JetBrains Mono', monospace; }
+
+  .badge-ok { color: var(--long); font-weight: 700; }
+  .badge-off { color: var(--text-muted); }
+
+  .mobile-tabs { display: none; }
+
+  @media (max-width: 780px) {
+    .layout { flex-direction: column; }
+    .sidebar {
+      width: 100%; flex-direction: row; overflow-x: auto; padding: 1rem;
+      border-right: none; border-bottom: 1px solid var(--border);
+    }
+    .brand, .brand-sub { display: none; }
+    .nav-item { flex-shrink: 0; }
+    .main { padding: 1.3rem 1rem; max-width: 100%; }
+    .stats-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-<div class="contenedor">
 
-  <div class="card">
-    <h1>UPS - Historico y Backtesting</h1>
-    <p style="color:#94a3b8; font-size:0.85rem; margin:0;">
-      Todo corre en Railway - no depende de tu PC ni de MT4 abierto.
-    </p>
-  </div>
+<div class="layout">
 
-  <!-- SUBIR CSV -->
-  <div class="card">
-    <h2>1. Subir historico (CSV)</h2>
-    <label for="up-symbol">Simbolo</label>
-    <input type="text" id="up-symbol" placeholder="XAGUSD">
-    <label for="up-timeframe">Timeframe</label>
-    <input type="text" id="up-timeframe" placeholder="W1">
-    <label>Archivo CSV</label>
-    <div id="drop">
-      <p id="drop-texto">Arrastra el CSV aqui, o toca para elegirlo</p>
-      <input type="file" id="archivo" accept=".csv">
+  <div class="sidebar">
+    <div class="brand">UPS <span>Control</span></div>
+    <div class="brand-sub">Sistema de senales</div>
+
+    <div class="nav-item activo" data-tab="cargar" onclick="cambiarTab('cargar')">
+      <span class="num">01</span> Cargar CSV
     </div>
-    <button id="btn-subir" disabled>Subir</button>
-    <div id="estado-upload"></div>
+    <div class="nav-item" data-tab="datos" onclick="cambiarTab('datos')">
+      <span class="num">02</span> Historico
+    </div>
+    <div class="nav-item" data-tab="backtest" onclick="cambiarTab('backtest')">
+      <span class="num">03</span> Backtest
+    </div>
+    <div class="nav-item" data-tab="vivo" onclick="cambiarTab('vivo')">
+      <span class="num">04</span> En vivo <span class="pulse"></span>
+    </div>
   </div>
 
-  <!-- DATOS DISPONIBLES -->
-  <div class="card">
-    <h2>2. Historico cargado <button class="refresh" onclick="cargarDisponibles()">↻ Actualizar</button></h2>
-    <div id="tabla-disponibles"><p class="vacio">Cargando...</p></div>
-  </div>
+  <div class="main">
 
-  <!-- BACKTEST -->
-  <div class="card">
-    <h2>3. Correr backtest</h2>
-    <label for="bt-symbol">Simbolo</label>
-    <input type="text" id="bt-symbol" placeholder="XAGUSD">
-    <label for="bt-timeframe">Timeframe</label>
-    <input type="text" id="bt-timeframe" placeholder="W1">
-    <button id="btn-backtest">Correr backtest</button>
-    <div id="estado-backtest"></div>
-    <div id="resultado-backtest"></div>
-  </div>
+    <!-- PANEL 1: CARGAR -->
+    <div class="panel activo" id="panel-cargar">
+      <div class="panel-header">
+        <h2>Cargar historico</h2>
+        <p>Sube el CSV exportado desde MT4 (UPS_Historico_Export.mq4). Se guarda en Postgres, en Railway.</p>
+      </div>
+      <div class="card">
+        <label for="up-symbol">Simbolo</label>
+        <input type="text" id="up-symbol" placeholder="XAGUSD">
+        <label for="up-timeframe">Timeframe</label>
+        <input type="text" id="up-timeframe" placeholder="W1">
+        <label>Archivo CSV</label>
+        <div id="drop">
+          <p id="drop-texto">Arrastra el CSV aqui, o toca para elegirlo</p>
+          <input type="file" id="archivo" accept=".csv" style="display:none">
+        </div>
+        <button class="ancho" id="btn-subir" disabled>Subir</button>
+        <div id="estado-upload"></div>
+      </div>
+    </div>
 
-  <!-- ESTADO EN VIVO -->
-  <div class="card">
-    <h2>4. Estado en vivo <button class="refresh" onclick="cargarEstadoVivo()">↻ Actualizar</button></h2>
-    <p style="color:#64748b; font-size:0.78rem; margin:0 0 0.5rem;">
-      Cumplimiento de reglas ahora mismo, segun los ultimos datos que mando el EA.
-      Se actualiza sola cada 20s.
-    </p>
-    <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
-  </div>
+    <!-- PANEL 2: DATOS DISPONIBLES -->
+    <div class="panel" id="panel-datos">
+      <div class="panel-header">
+        <h2>Historico disponible</h2>
+        <p>Pares y timeframes ya cargados en la base de datos.</p>
+      </div>
+      <div class="card">
+        <div class="section-title-row">
+          <h3 style="margin:0">Tablas cargadas</h3>
+          <button class="ghost" onclick="cargarDisponibles()">Actualizar</button>
+        </div>
+        <div id="tabla-disponibles"><p class="vacio">Cargando...</p></div>
+      </div>
+    </div>
 
+    <!-- PANEL 3: BACKTEST -->
+    <div class="panel" id="panel-backtest">
+      <div class="panel-header">
+        <h2>Backtest</h2>
+        <p>Corre el motor de reglas UPS sobre el historico cargado. 100% en Railway.</p>
+      </div>
+      <div class="card">
+        <label for="bt-symbol">Simbolo</label>
+        <input type="text" id="bt-symbol" placeholder="XAGUSD">
+        <label for="bt-timeframe">Timeframe</label>
+        <input type="text" id="bt-timeframe" placeholder="W1">
+        <button class="ancho" id="btn-backtest">Correr backtest</button>
+        <div id="estado-backtest"></div>
+        <div id="resultado-backtest"></div>
+      </div>
+    </div>
+
+    <!-- PANEL 4: EN VIVO -->
+    <div class="panel" id="panel-vivo">
+      <div class="panel-header">
+        <h2>Estado en vivo</h2>
+        <p>Cumplimiento de reglas ahora mismo, segun los ultimos datos que mando el EA. Se actualiza sola cada 20s.</p>
+      </div>
+      <div class="card">
+        <div class="section-title-row">
+          <h3 style="margin:0">Pares monitoreados</h3>
+          <button class="ghost" onclick="cargarEstadoVivo()">Actualizar</button>
+        </div>
+        <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <script>
+// ---------- NAVEGACION DE PESTANAS ----------
+function cambiarTab(tab) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('activo'));
+  document.querySelectorAll('.panel').forEach(el => el.classList.remove('activo'));
+  document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('activo');
+  document.getElementById(`panel-${tab}`).classList.add('activo');
+}
+
 // ---------- SUBIR CSV ----------
 const drop = document.getElementById('drop');
 const input = document.getElementById('archivo');
@@ -419,7 +573,7 @@ input.addEventListener('change', () => {
 
 function seleccionarArchivo(archivo) {
   archivoSeleccionado = archivo;
-  dropTexto.textContent = "OK: " + archivo.name;
+  dropTexto.textContent = archivo.name;
   btnSubir.disabled = false;
 }
 
@@ -448,7 +602,7 @@ btnSubir.addEventListener('click', async () => {
     const data = await resp.json();
 
     if (resp.ok) {
-      estadoUpload.textContent = `OK: ${data.velas_guardadas} velas guardadas para ${data.symbol} ${data.timeframe}`;
+      estadoUpload.textContent = `${data.velas_guardadas} velas guardadas para ${data.symbol} ${data.timeframe}`;
       estadoUpload.className = "ok";
       dropTexto.textContent = "Arrastra el CSV aqui, o toca para elegirlo";
       archivoSeleccionado = null;
@@ -483,9 +637,9 @@ async function cargarDisponibles() {
     for (const f of filas) {
       html += `<tr class="clickable" onclick="usarEnBacktest('${f.symbol}','${f.timeframe}')">
                  <td>${f.symbol}</td><td>${f.timeframe}</td><td>${f.velas}</td>
-                 <td>${f.desde} a ${f.hasta}</td></tr>`;
+                 <td>${f.desde} &rarr; ${f.hasta}</td></tr>`;
     }
-    html += '</table><p style="color:#64748b; font-size:0.78rem; margin-top:0.5rem;">Toca una fila para usarla en el backtest de abajo.</p>';
+    html += '</table>';
     cont.innerHTML = html;
   } catch (err) {
     cont.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
@@ -495,7 +649,7 @@ async function cargarDisponibles() {
 function usarEnBacktest(symbol, timeframe) {
   document.getElementById('bt-symbol').value = symbol;
   document.getElementById('bt-timeframe').value = timeframe;
-  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  cambiarTab('backtest');
 }
 
 // ---------- BACKTEST ----------
@@ -532,14 +686,14 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
     resultado.innerHTML = `
       <div class="stats-grid">
         <div class="stat-box long">
-          <h3>LONG Type 1</h3>
+          <h4>LONG Type 1</h4>
           <div class="stat-row"><span>Senales</span><b>${l.total_senales}</b></div>
           <div class="stat-row"><span>% Acierto</span><b>${l.pct_acierto}%</b></div>
           <div class="stat-row"><span>Ganados/Perdidos</span><b>${l.ganados}/${l.perdidos}</b></div>
           <div class="stat-row"><span>Neto (pips)</span><b>${l.resultado_neto_pips}</b></div>
         </div>
         <div class="stat-box short">
-          <h3>SHORT Type 1</h3>
+          <h4>SHORT Type 1</h4>
           <div class="stat-row"><span>Senales</span><b>${s.total_senales}</b></div>
           <div class="stat-row"><span>% Acierto</span><b>${s.pct_acierto}%</b></div>
           <div class="stat-row"><span>Ganados/Perdidos</span><b>${s.ganados}/${s.perdidos}</b></div>
@@ -552,9 +706,6 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
   }
 });
 
-// Cargar la lista de disponibles apenas abre la pagina
-cargarDisponibles();
-
 // ---------- ESTADO EN VIVO ----------
 function formatearTiempo(segundos) {
   if (segundos < 90) return segundos + "s";
@@ -565,9 +716,9 @@ function formatearTiempo(segundos) {
 }
 
 function badgeSenal(cumplimiento, completa) {
-  const color = completa ? "#4ade80" : "#94a3b8";
-  const marca = completa ? " ✓" : "";
-  return `<span style="color:${color}; font-weight:${completa ? '700' : '400'}">${cumplimiento}${marca}</span>`;
+  const clase = completa ? "badge-ok" : "badge-off";
+  const marca = completa ? " OK" : "";
+  return `<span class="${clase}">${cumplimiento}${marca}</span>`;
 }
 
 async function cargarEstadoVivo() {
@@ -585,7 +736,7 @@ async function cargarEstadoVivo() {
     let html = '<table><tr><th>Par</th><th>TF</th><th>Long T1</th><th>Short T1</th><th>Long T2</th><th>Short T2</th><th>Hace</th></tr>';
     for (const p of pares) {
       const antiguo = p.actualizado_hace_segundos > 180;
-      html += `<tr style="${antiguo ? 'opacity:0.5' : ''}">
+      html += `<tr style="${antiguo ? 'opacity:0.4' : ''}">
                  <td>${p.symbol}</td><td>${p.timeframe}</td>
                  <td>${badgeSenal(p.long_t1, p.long_t1_completa)}</td>
                  <td>${badgeSenal(p.short_t1, p.short_t1_completa)}</td>
@@ -601,14 +752,13 @@ async function cargarEstadoVivo() {
   }
 }
 
+cargarDisponibles();
 cargarEstadoVivo();
 setInterval(cargarEstadoVivo, 20000);
 </script>
 </body>
 </html>
 """
-
-
 
 
 @app.get("/pares-vigilados")
