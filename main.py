@@ -432,6 +432,13 @@ def panel_unificado():
   .badge-ok { color: var(--long); font-weight: 700; }
   .badge-off { color: var(--text-muted); }
 
+  .grupo-activo { margin-bottom: 1.4rem; padding-bottom: 1.2rem; border-bottom: 1px solid var(--border); }
+  .grupo-activo:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .grupo-activo-titulo {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.98rem;
+    color: var(--accent); margin-bottom: 0.5rem; letter-spacing: 0.02em;
+  }
+
   .mobile-tabs { display: none; }
 
   @media (max-width: 780px) {
@@ -733,19 +740,34 @@ async function cargarEstadoVivo() {
       return;
     }
 
-    let html = '<table><tr><th>Par</th><th>TF</th><th>Long T1</th><th>Short T1</th><th>Long T2</th><th>Short T2</th><th>Hace</th></tr>';
+    // Agrupar por simbolo, asi cada activo queda visualmente separado
+    // con sus propios timeframes debajo, evitando confundir lecturas
+    // de distintos timeframes entre si.
+    const grupos = {};
     for (const p of pares) {
-      const antiguo = p.actualizado_hace_segundos > 180;
-      html += `<tr style="${antiguo ? 'opacity:0.4' : ''}">
-                 <td>${p.symbol}</td><td>${p.timeframe}</td>
-                 <td>${badgeSenal(p.long_t1, p.long_t1_completa)}</td>
-                 <td>${badgeSenal(p.short_t1, p.short_t1_completa)}</td>
-                 <td>${p.long_t2 ? badgeSenal(p.long_t2, p.long_t2_completa) : '-'}</td>
-                 <td>${p.short_t2 ? badgeSenal(p.short_t2, p.short_t2_completa) : '-'}</td>
-                 <td>${formatearTiempo(p.actualizado_hace_segundos)}</td>
-               </tr>`;
+      if (!grupos[p.symbol]) grupos[p.symbol] = [];
+      grupos[p.symbol].push(p);
     }
-    html += '</table>';
+
+    let html = '';
+    for (const symbol of Object.keys(grupos).sort()) {
+      html += `<div class="grupo-activo">
+                 <div class="grupo-activo-titulo">${symbol}</div>
+                 <table>
+                   <tr><th>TF</th><th>Long T1</th><th>Short T1</th><th>Long T2</th><th>Short T2</th><th>Hace</th></tr>`;
+      for (const p of grupos[symbol]) {
+        const antiguo = p.actualizado_hace_segundos > 180;
+        html += `<tr style="${antiguo ? 'opacity:0.4' : ''}">
+                   <td>${p.timeframe}</td>
+                   <td>${badgeSenal(p.long_t1, p.long_t1_completa)}</td>
+                   <td>${badgeSenal(p.short_t1, p.short_t1_completa)}</td>
+                   <td>${p.long_t2 ? badgeSenal(p.long_t2, p.long_t2_completa) : '-'}</td>
+                   <td>${p.short_t2 ? badgeSenal(p.short_t2, p.short_t2_completa) : '-'}</td>
+                   <td>${formatearTiempo(p.actualizado_hace_segundos)}</td>
+                 </tr>`;
+      }
+      html += '</table></div>';
+    }
     cont.innerHTML = html;
   } catch (err) {
     cont.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
