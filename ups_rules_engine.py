@@ -193,11 +193,22 @@ def regla1_cs_long(lectura: LecturaIndicadores) -> ResultadoRegla:
     return ResultadoRegla(1, "CS: blanca > magenta y subiendo", cumple, detalle)
 
 
+def _color_activo(valor: Optional[float]) -> bool:
+    """
+    Un buffer de color UPS (TT/TRWave) esta 'activo' cuando tiene un
+    valor real y distinto de cero. Algunos indicadores devuelven 0.0
+    real para el color inactivo (no None/EMPTY_VALUE) - por eso no
+    basta con chequear 'is not None', hay que chequear tambien != 0.
+    """
+    return valor is not None and valor != 0
+
+
 def regla2_tt_long(lectura: LecturaIndicadores) -> ResultadoRegla:
     """TT: coloreado verde (claro u oscuro)."""
-    cumple = lectura.tt_darkgreen is not None or lectura.tt_lime is not None
-    tono = "Dark Green" if lectura.tt_darkgreen is not None else (
-        "Light Green" if lectura.tt_lime is not None else "no verde")
+    dark_activo = _color_activo(lectura.tt_darkgreen)
+    lime_activo = _color_activo(lectura.tt_lime)
+    cumple = dark_activo or lime_activo
+    tono = "Dark Green" if dark_activo else ("Light Green" if lime_activo else "no verde")
     return ResultadoRegla(2, "TT: verde (claro u oscuro)", cumple, f"tono actual: {tono}")
 
 
@@ -213,8 +224,10 @@ def regla3_trvi(lectura: LecturaIndicadores, umbrales: dict = None) -> Resultado
 
 def regla4_trwave_long(lectura: LecturaIndicadores) -> ResultadoRegla:
     """TR Wave: verde (claro u oscuro) y por encima del nivel Zero."""
-    verde_activo = lectura.trwave_darkgreen is not None or lectura.trwave_lime is not None
-    valor = lectura.trwave_darkgreen or lectura.trwave_lime or 0
+    dark_activo = _color_activo(lectura.trwave_darkgreen)
+    lime_activo = _color_activo(lectura.trwave_lime)
+    verde_activo = dark_activo or lime_activo
+    valor = lectura.trwave_darkgreen if dark_activo else (lectura.trwave_lime if lime_activo else 0)
     cumple = verde_activo and valor > 0
     return ResultadoRegla(4, "TR Wave: verde y sobre nivel Zero", cumple,
                            f"verde_activo={verde_activo} valor={valor:.2f}")
@@ -256,15 +269,18 @@ def regla1_cs_short(lectura: LecturaIndicadores) -> ResultadoRegla:
 
 
 def regla2_tt_short(lectura: LecturaIndicadores) -> ResultadoRegla:
-    cumple = lectura.tt_maroon is not None or lectura.tt_red is not None
-    tono = "Dark Red" if lectura.tt_maroon is not None else (
-        "Light Red" if lectura.tt_red is not None else "no rojo")
+    maroon_activo = _color_activo(lectura.tt_maroon)
+    red_activo = _color_activo(lectura.tt_red)
+    cumple = maroon_activo or red_activo
+    tono = "Dark Red" if maroon_activo else ("Light Red" if red_activo else "no rojo")
     return ResultadoRegla(2, "TT: rojo (claro u oscuro)", cumple, f"tono actual: {tono}")
 
 
 def regla4_trwave_short(lectura: LecturaIndicadores) -> ResultadoRegla:
-    rojo_activo = lectura.trwave_maroon is not None or lectura.trwave_red is not None
-    valor = lectura.trwave_maroon or lectura.trwave_red or 0
+    maroon_activo = _color_activo(lectura.trwave_maroon)
+    red_activo = _color_activo(lectura.trwave_red)
+    rojo_activo = maroon_activo or red_activo
+    valor = lectura.trwave_maroon if maroon_activo else (lectura.trwave_red if red_activo else 0)
     cumple = rojo_activo and valor < 0
     return ResultadoRegla(4, "TR Wave: rojo y bajo nivel Zero", cumple,
                            f"rojo_activo={rojo_activo} valor={valor:.2f}")
