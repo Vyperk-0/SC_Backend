@@ -51,12 +51,13 @@ app = FastAPI(
 @app.on_event("startup")
 def inicializar():
     try:
-        db.inicializar_tabla()
-        logger.info("Tabla de historico verificada/creada en Postgres.")
+        db.verificar_conexion()
+        logger.info("Conexion a Postgres verificada. Las tablas se crean "
+                    "automaticamente por simbolo/timeframe al subir historico.")
     except Exception as e:
-        logger.warning(f"No se pudo inicializar la base de datos: {e}. "
+        logger.warning(f"No se pudo conectar a la base de datos: {e}. "
                         f"Los endpoints de historico/backtesting no funcionaran "
-                        f"hasta que agregues un servicio Postgres en Railway.")
+                        f"hasta que agregues/conectes un servicio Postgres en Railway.")
 
 
 # =====================================================================

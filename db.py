@@ -1,20 +1,37 @@
 # -*- coding: utf-8 -*-
 """
 Conexion a Postgres (base de datos de Railway) donde vive el
-historico de precios + indicadores. Reemplaza el uso de CSV locales
-para que el backtesting no dependa de la PC del usuario - todo el
-historico vive en la nube, junto con el resto del backend.
+historico de precios + indicadores.
+
+DISENO: cada combinacion simbolo + timeframe vive en su PROPIA tabla
+(ej. historico_XAGUSD_W1, historico_EURUSD_H1), en vez de una sola
+tabla compartida con columna "symbol". Las tablas se crean
+automaticamente la primera vez que se sube historico de ese
+simbolo/timeframe - no hace falta crearlas a mano.
 
 Railway provee la variable de entorno DATABASE_URL automaticamente
 al agregar un servicio de Postgres al proyecto.
 """
 
 import os
+import re
 import psycopg2
+import psycopg2.errors
+from psycopg2 import sql
 from psycopg2.extras import execute_values
 from typing import List, Optional
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+COLUMNAS = [
+    "time", "open", "high", "low", "close",
+    "cs_magenta", "cs_blanca",
+    "tt_darkgreen", "tt_maroon", "tt_lime", "tt_red",
+    "trvi_valor",
+    "trwave_darkgreen", "trwave_maroon", "trwave_lime", "trwave_red",
+    "tsd_aqua", "tsd_yellow",
+    "bb_inferior", "bb_superior",
+]
 
 
 def get_connection():
@@ -22,99 +39,87 @@ def get_connection():
         raise RuntimeError(
             "DATABASE_URL no esta configurada. Agrega un servicio de "
             "Postgres al proyecto de Railway (New -> Database -> "
-            "PostgreSQL) - la variable se agrega automaticamente."
+            "PostgreSQL) y conecta la variable al servicio web."
         )
     return psycopg2.connect(DATABASE_URL)
 
 
-def inicializar_tabla():
-    """Crea la tabla de historico si no existe. Se llama al arrancar el backend."""
-    sql = """
-    CREATE TABLE IF NOT EXISTS historico (
-        symbol TEXT NOT NULL,
-        timeframe TEXT NOT NULL,
-        time TIMESTAMP NOT NULL,
-        open DOUBLE PRECISION,
-        high DOUBLE PRECISION,
-        low DOUBLE PRECISION,
-        close DOUBLE PRECISION,
-        cs_magenta DOUBLE PRECISION,
-        cs_blanca DOUBLE PRECISION,
-        tt_darkgreen DOUBLE PRECISION,
-        tt_maroon DOUBLE PRECISION,
-        tt_lime DOUBLE PRECISION,
-        tt_red DOUBLE PRECISION,
-        trvi_valor DOUBLE PRECISION,
-        trwave_darkgreen DOUBLE PRECISION,
-        trwave_maroon DOUBLE PRECISION,
-        trwave_lime DOUBLE PRECISION,
-        trwave_red DOUBLE PRECISION,
-        tsd_aqua DOUBLE PRECISION,
-        tsd_yellow DOUBLE PRECISION,
-        bb_inferior DOUBLE PRECISION,
-        bb_superior DOUBLE PRECISION,
-        PRIMARY KEY (symbol, timeframe, time)
-    );
+def _nombre_tabla(symbol: str, timeframe: str) -> str:
     """
+    Genera el nombre de tabla para este simbolo/timeframe, ej.
+    historico_XAGUSD_W1. Se sanitiza a solo letras/numeros para
+    evitar inyeccion SQL, ya que estos valores vienen de parametros
+    de la URL (query params del usuario).
+    """
+    symbol_limpio = re.sub(r"[^A-Za-z0-9]", "", symbol).upper()
+    tf_limpio = re.sub(r"[^A-Za-z0-9]", "", timeframe).upper()
+    if not symbol_limpio or not tf_limpio:
+        raise ValueError("symbol/timeframe invalido (debe tener letras/numeros)")
+    return f"historico_{symbol_limpio}_{tf_limpio}"
+
+
+def verificar_conexion():
+    """Chequeo simple de que la base de datos responde. Se llama al arrancar el backend."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql)
-        conn.commit()
+            cur.execute("SELECT 1;")
     finally:
         conn.close()
 
 
 def guardar_historico(symbol: str, timeframe: str, filas: List[dict]) -> int:
     """
-    Inserta (o actualiza si ya existia esa vela exacta) las filas de
-    historico. Devuelve cuantas filas se procesaron.
+    Crea (si no existe) la tabla propia de este simbolo/timeframe, e
+    inserta/actualiza las filas dadas.
     """
     if not filas:
         return 0
 
-    columnas = [
-        "symbol", "timeframe", "time", "open", "high", "low", "close",
-        "cs_magenta", "cs_blanca",
-        "tt_darkgreen", "tt_maroon", "tt_lime", "tt_red",
-        "trvi_valor",
-        "trwave_darkgreen", "trwave_maroon", "trwave_lime", "trwave_red",
-        "tsd_aqua", "tsd_yellow",
-        "bb_inferior", "bb_superior",
-    ]
+    tabla = _nombre_tabla(symbol, timeframe)
 
-    valores = []
-    for f in filas:
-        valores.append((
-            symbol, timeframe, f["time"], f["open"], f["high"], f["low"], f["close"],
-            f["cs_magenta"], f["cs_blanca"],
-            f["tt_darkgreen"], f["tt_maroon"], f["tt_lime"], f["tt_red"],
-            f["trvi_valor"],
-            f["trwave_darkgreen"], f["trwave_maroon"], f["trwave_lime"], f["trwave_red"],
-            f["tsd_aqua"], f["tsd_yellow"],
-            f["bb_inferior"], f["bb_superior"],
-        ))
+    crear_sql = sql.SQL("""
+        CREATE TABLE IF NOT EXISTS {tabla} (
+            time TIMESTAMP PRIMARY KEY,
+            open DOUBLE PRECISION, high DOUBLE PRECISION,
+            low DOUBLE PRECISION, close DOUBLE PRECISION,
+            cs_magenta DOUBLE PRECISION, cs_blanca DOUBLE PRECISION,
+            tt_darkgreen DOUBLE PRECISION, tt_maroon DOUBLE PRECISION,
+            tt_lime DOUBLE PRECISION, tt_red DOUBLE PRECISION,
+            trvi_valor DOUBLE PRECISION,
+            trwave_darkgreen DOUBLE PRECISION, trwave_maroon DOUBLE PRECISION,
+            trwave_lime DOUBLE PRECISION, trwave_red DOUBLE PRECISION,
+            tsd_aqua DOUBLE PRECISION, tsd_yellow DOUBLE PRECISION,
+            bb_inferior DOUBLE PRECISION, bb_superior DOUBLE PRECISION
+        );
+    """).format(tabla=sql.Identifier(tabla))
 
-    sql = f"""
-    INSERT INTO historico ({", ".join(columnas)})
-    VALUES %s
-    ON CONFLICT (symbol, timeframe, time) DO UPDATE SET
-        open = EXCLUDED.open, high = EXCLUDED.high,
-        low = EXCLUDED.low, close = EXCLUDED.close,
-        cs_magenta = EXCLUDED.cs_magenta, cs_blanca = EXCLUDED.cs_blanca,
-        tt_darkgreen = EXCLUDED.tt_darkgreen, tt_maroon = EXCLUDED.tt_maroon,
-        tt_lime = EXCLUDED.tt_lime, tt_red = EXCLUDED.tt_red,
-        trvi_valor = EXCLUDED.trvi_valor,
-        trwave_darkgreen = EXCLUDED.trwave_darkgreen, trwave_maroon = EXCLUDED.trwave_maroon,
-        trwave_lime = EXCLUDED.trwave_lime, trwave_red = EXCLUDED.trwave_red,
-        tsd_aqua = EXCLUDED.tsd_aqua, tsd_yellow = EXCLUDED.tsd_yellow,
-        bb_inferior = EXCLUDED.bb_inferior, bb_superior = EXCLUDED.bb_superior;
-    """
+    insert_sql = sql.SQL("""
+        INSERT INTO {tabla} ({columnas})
+        VALUES %s
+        ON CONFLICT (time) DO UPDATE SET
+            open = EXCLUDED.open, high = EXCLUDED.high,
+            low = EXCLUDED.low, close = EXCLUDED.close,
+            cs_magenta = EXCLUDED.cs_magenta, cs_blanca = EXCLUDED.cs_blanca,
+            tt_darkgreen = EXCLUDED.tt_darkgreen, tt_maroon = EXCLUDED.tt_maroon,
+            tt_lime = EXCLUDED.tt_lime, tt_red = EXCLUDED.tt_red,
+            trvi_valor = EXCLUDED.trvi_valor,
+            trwave_darkgreen = EXCLUDED.trwave_darkgreen, trwave_maroon = EXCLUDED.trwave_maroon,
+            trwave_lime = EXCLUDED.trwave_lime, trwave_red = EXCLUDED.trwave_red,
+            tsd_aqua = EXCLUDED.tsd_aqua, tsd_yellow = EXCLUDED.tsd_yellow,
+            bb_inferior = EXCLUDED.bb_inferior, bb_superior = EXCLUDED.bb_superior;
+    """).format(
+        tabla=sql.Identifier(tabla),
+        columnas=sql.SQL(", ").join(sql.Identifier(c) for c in COLUMNAS),
+    )
+
+    valores = [tuple(f[c] for c in COLUMNAS) for f in filas]
 
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            execute_values(cur, sql, valores)
+            cur.execute(crear_sql)
+            execute_values(cur, insert_sql.as_string(conn), valores)
         conn.commit()
     finally:
         conn.close()
@@ -123,54 +128,73 @@ def guardar_historico(symbol: str, timeframe: str, filas: List[dict]) -> int:
 
 
 def obtener_historico(symbol: str, timeframe: str) -> List[dict]:
-    """Devuelve el historico guardado para symbol/timeframe, ordenado
-    cronologicamente (mas viejo -> mas nuevo), listo para el backtest."""
-    sql = """
-    SELECT time, symbol, timeframe, open, high, low, close,
-           cs_magenta, cs_blanca,
-           tt_darkgreen, tt_maroon, tt_lime, tt_red,
-           trvi_valor,
-           trwave_darkgreen, trwave_maroon, trwave_lime, trwave_red,
-           tsd_aqua, tsd_yellow,
-           bb_inferior, bb_superior
-    FROM historico
-    WHERE symbol = %s AND timeframe = %s
-    ORDER BY time ASC;
-    """
+    """Devuelve el historico de la tabla propia de este simbolo/timeframe,
+    ordenado cronologicamente. Lista vacia si la tabla aun no existe."""
+    tabla = _nombre_tabla(symbol, timeframe)
+
+    query = sql.SQL("""
+        SELECT {columnas} FROM {tabla} ORDER BY time ASC;
+    """).format(
+        columnas=sql.SQL(", ").join(sql.Identifier(c) for c in COLUMNAS),
+        tabla=sql.Identifier(tabla),
+    )
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (symbol, timeframe))
-            columnas = [desc[0] for desc in cur.description]
-            filas = [dict(zip(columnas, row)) for row in cur.fetchall()]
+            try:
+                cur.execute(query)
+            except psycopg2.errors.UndefinedTable:
+                conn.rollback()
+                return []
+            columnas_resultado = [desc[0] for desc in cur.description]
+            filas = [dict(zip(columnas_resultado, row)) for row in cur.fetchall()]
     finally:
         conn.close()
 
+    symbol_limpio = re.sub(r"[^A-Za-z0-9]", "", symbol).upper()
+    tf_limpio = re.sub(r"[^A-Za-z0-9]", "", timeframe).upper()
     for f in filas:
+        f["symbol"] = symbol_limpio
+        f["timeframe"] = tf_limpio
         f["time"] = f["time"].strftime("%Y.%m.%d %H:%M")
 
     return filas
 
 
 def listar_pares_disponibles() -> List[dict]:
-    """Devuelve la lista de (symbol, timeframe) que ya tienen historico
-    cargado, con la cantidad de velas de cada uno."""
-    sql = """
-    SELECT symbol, timeframe, COUNT(*) as velas,
-           MIN(time) as desde, MAX(time) as hasta
-    FROM historico
-    GROUP BY symbol, timeframe
-    ORDER BY symbol, timeframe;
-    """
+    """Recorre las tablas historico_* existentes y devuelve un resumen
+    de cada una (simbolo, timeframe, cantidad de velas, rango de fechas)."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql)
-            resultado = [
-                {"symbol": r[0], "timeframe": r[1], "velas": r[2],
-                 "desde": r[3].strftime("%Y-%m-%d"), "hasta": r[4].strftime("%Y-%m-%d")}
-                for r in cur.fetchall()
-            ]
+            cur.execute("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name LIKE 'historico\\_%%' ESCAPE '\\'
+                ORDER BY table_name;
+            """)
+            tablas = [r[0] for r in cur.fetchall()]
+
+            resultado = []
+            for t in tablas:
+                partes = t[len("historico_"):].rsplit("_", 1)
+                if len(partes) != 2:
+                    continue
+                symbol, timeframe = partes
+
+                cur.execute(sql.SQL(
+                    "SELECT COUNT(*), MIN(time), MAX(time) FROM {t};"
+                ).format(t=sql.Identifier(t)))
+                count, desde, hasta = cur.fetchone()
+
+                resultado.append({
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "velas": count,
+                    "desde": desde.strftime("%Y-%m-%d") if desde else None,
+                    "hasta": hasta.strftime("%Y-%m-%d") if hasta else None,
+                })
     finally:
         conn.close()
+
     return resultado
