@@ -432,20 +432,43 @@ def panel_unificado():
   .badge-ok { color: var(--long); font-weight: 700; }
   .badge-off { color: var(--text-muted); }
 
+  .leyenda {
+    display: flex; flex-wrap: wrap; gap: 0.9rem; margin-top: 0.8rem;
+    padding-top: 0.8rem; border-top: 1px solid var(--border);
+    font-size: 0.72rem; color: var(--text-muted);
+  }
+  .leyenda b { color: var(--text); }
+  .badge-short { color: var(--short); font-weight: 700; }
+
   #tabla-vivo {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 0.6rem;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.7rem;
   }
   .grupo-activo {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 0.6rem 0.65rem;
+    border-radius: 8px; padding: 0.75rem 0.85rem;
   }
   .grupo-activo-titulo {
-    font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.82rem;
-    color: var(--accent); margin-bottom: 0.4rem; letter-spacing: 0.02em;
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.88rem;
+    color: var(--accent); margin-bottom: 0.55rem; letter-spacing: 0.02em;
   }
-  .grupo-activo table { font-size: 0.68rem; }
-  .grupo-activo th, .grupo-activo td { padding: 0.25rem 0.25rem; }
-  .grupo-activo th { font-size: 0.6rem; }
+  .tf-block { margin-bottom: 0.6rem; }
+  .tf-block:last-child { margin-bottom: 0; }
+  .tf-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.3rem;
+    border-bottom: 1px solid var(--border); padding-bottom: 0.2rem;
+  }
+  .tf-header .tf-nombre { color: var(--text); font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+  .tipo-row {
+    display: flex; align-items: center; gap: 0.4rem; font-size: 0.74rem;
+    font-family: 'JetBrains Mono', monospace; margin-bottom: 0.15rem;
+  }
+  .tipo-row:last-child { margin-bottom: 0; }
+  .tipo-tag { color: var(--text-muted); font-family: 'Inter', sans-serif; width: 18px; flex-shrink: 0; font-size: 0.68rem; }
+  .flecha-long { color: var(--text-muted); }
+  .flecha-long.completa { color: var(--long); font-weight: 700; }
+  .flecha-short { color: var(--text-muted); }
+  .flecha-short.completa { color: var(--short); font-weight: 700; }
 
   .mobile-tabs { display: none; }
 
@@ -548,6 +571,13 @@ def panel_unificado():
             <p style="margin:0">Cumplimiento de reglas ahora mismo. Se actualiza sola cada 20s.</p>
           </div>
           <button class="ghost" onclick="cargarEstadoVivo()">Actualizar</button>
+        </div>
+        <div class="leyenda">
+          <span><span class="badge-ok">&uarr;</span> Long</span>
+          <span><span class="badge-short">&darr;</span> Short</span>
+          <span><b>T1</b> = Type 1</span>
+          <span><b>T2</b> = Type 2 (confirmado en TF superior)</span>
+          <span><span class="badge-ok">&check;</span> = todas las reglas cumplidas</span>
         </div>
       </div>
       <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
@@ -729,10 +759,33 @@ function formatearTiempo(segundos) {
   return horas + "h";
 }
 
-function badgeSenal(cumplimiento, completa) {
-  const clase = completa ? "badge-ok" : "badge-off";
-  const marca = completa ? " OK" : "";
-  return `<span class="${clase}">${cumplimiento}${marca}</span>`;
+function flecha(direccion, valor, completa) {
+  const icono = direccion === 'long' ? '&uarr;' : '&darr;';
+  const clase = direccion === 'long' ? 'flecha-long' : 'flecha-short';
+  return `<span class="${clase} ${completa ? 'completa' : ''}">${icono} ${valor}</span>`;
+}
+
+function bloqueTimeframe(p) {
+  const antiguo = p.actualizado_hace_segundos > 180;
+  let html = `<div class="tf-block" style="${antiguo ? 'opacity:0.4' : ''}">
+                <div class="tf-header">
+                  <span class="tf-nombre">${p.timeframe}</span>
+                  <span>${formatearTiempo(p.actualizado_hace_segundos)}</span>
+                </div>
+                <div class="tipo-row">
+                  <span class="tipo-tag">T1</span>
+                  ${flecha('long', p.long_t1, p.long_t1_completa)}
+                  ${flecha('short', p.short_t1, p.short_t1_completa)}
+                </div>`;
+  if (p.long_t2) {
+    html += `<div class="tipo-row">
+                <span class="tipo-tag">T2</span>
+                ${flecha('long', p.long_t2, p.long_t2_completa)}
+                ${flecha('short', p.short_t2, p.short_t2_completa)}
+              </div>`;
+  }
+  html += '</div>';
+  return html;
 }
 
 async function cargarEstadoVivo() {
@@ -759,21 +812,11 @@ async function cargarEstadoVivo() {
     let html = '';
     for (const symbol of Object.keys(grupos).sort()) {
       html += `<div class="grupo-activo">
-                 <div class="grupo-activo-titulo">${symbol}</div>
-                 <table>
-                   <tr><th>TF</th><th>L1</th><th>S1</th><th>L2</th><th>S2</th><th>&Delta;</th></tr>`;
+                 <div class="grupo-activo-titulo">${symbol}</div>`;
       for (const p of grupos[symbol]) {
-        const antiguo = p.actualizado_hace_segundos > 180;
-        html += `<tr style="${antiguo ? 'opacity:0.4' : ''}">
-                   <td>${p.timeframe}</td>
-                   <td>${badgeSenal(p.long_t1, p.long_t1_completa)}</td>
-                   <td>${badgeSenal(p.short_t1, p.short_t1_completa)}</td>
-                   <td>${p.long_t2 ? badgeSenal(p.long_t2, p.long_t2_completa) : '-'}</td>
-                   <td>${p.short_t2 ? badgeSenal(p.short_t2, p.short_t2_completa) : '-'}</td>
-                   <td>${formatearTiempo(p.actualizado_hace_segundos)}</td>
-                 </tr>`;
+        html += bloqueTimeframe(p);
       }
-      html += '</table></div>';
+      html += '</div>';
     }
     cont.innerHTML = html;
   } catch (err) {
