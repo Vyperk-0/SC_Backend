@@ -84,10 +84,10 @@ class LecturaIndicadores:
     timeframe: str
     precio: float
 
-    # UPS_CS
-    cs_magenta: float
-    cs_blanca: float
-    cs_blanca_prev: float  # vela anterior, para detectar "going up/down"
+    # UPS_CS (None = el indicador aun no termino de calcular en este ciclo)
+    cs_magenta: Optional[float]
+    cs_blanca: Optional[float]
+    cs_blanca_prev: Optional[float]  # vela anterior, para detectar "going up/down"
 
     # UPS_TT  (None = ese color no esta activo en esta vela)
     tt_darkgreen: Optional[float]
@@ -96,7 +96,7 @@ class LecturaIndicadores:
     tt_red: Optional[float]
 
     # UPS_TRVI
-    trvi_valor: float  # volatilidad numerica cruda
+    trvi_valor: Optional[float]  # volatilidad numerica cruda
 
     # UPS_TRWave
     trwave_darkgreen: Optional[float]
@@ -108,9 +108,9 @@ class LecturaIndicadores:
     tsd_aqua: Optional[float]
     tsd_yellow: Optional[float]
 
-    # UPS_BBCloud
-    bb_inferior: float
-    bb_superior: float
+    # UPS_BBCloud (None = el indicador aun no termino de calcular)
+    bb_inferior: Optional[float]
+    bb_superior: Optional[float]
 
 
 @dataclass
@@ -181,6 +181,9 @@ def volatilidad_suficiente(lectura: LecturaIndicadores,
 
 def regla1_cs_long(lectura: LecturaIndicadores) -> ResultadoRegla:
     """CS: blanca por encima (o cruzando por encima) de magenta, subiendo."""
+    if lectura.cs_blanca is None or lectura.cs_magenta is None or lectura.cs_blanca_prev is None:
+        return ResultadoRegla(1, "CS: blanca > magenta y subiendo", False,
+                               "dato no disponible (indicador CS aun calculando)")
     arriba = lectura.cs_blanca > lectura.cs_magenta
     subiendo = lectura.cs_blanca > lectura.cs_blanca_prev
     cumple = arriba and subiendo
@@ -200,6 +203,9 @@ def regla2_tt_long(lectura: LecturaIndicadores) -> ResultadoRegla:
 
 def regla3_trvi(lectura: LecturaIndicadores, umbrales: dict = None) -> ResultadoRegla:
     """TRVI: volatilidad suficiente (umbral propio, ver nota arriba)."""
+    if lectura.trvi_valor is None:
+        return ResultadoRegla(3, "TRVI: volatilidad suficiente", False,
+                               "dato no disponible (indicador TRVI aun calculando)")
     cumple = volatilidad_suficiente(lectura, umbrales)
     return ResultadoRegla(3, "TRVI: volatilidad suficiente", cumple,
                            f"volatilidad={lectura.trvi_valor:.2f}")
@@ -224,6 +230,9 @@ def regla5_tsd_long(lectura: LecturaIndicadores) -> ResultadoRegla:
 
 def regla6_bbcloud_long(lectura: LecturaIndicadores) -> ResultadoRegla:
     """Precio cruzando o por encima de la banda inferior de BB Cloud."""
+    if lectura.bb_inferior is None:
+        return ResultadoRegla(6, "Precio >= banda inferior BB Cloud", False,
+                               "dato no disponible (indicador BBCloud aun calculando)")
     cumple = lectura.precio >= lectura.bb_inferior
     return ResultadoRegla(6, "Precio >= banda inferior BB Cloud", cumple,
                            f"precio={lectura.precio:.2f} banda_inferior={lectura.bb_inferior:.2f}")
@@ -234,6 +243,9 @@ def regla6_bbcloud_long(lectura: LecturaIndicadores) -> ResultadoRegla:
 # =====================================================================
 
 def regla1_cs_short(lectura: LecturaIndicadores) -> ResultadoRegla:
+    if lectura.cs_blanca is None or lectura.cs_magenta is None or lectura.cs_blanca_prev is None:
+        return ResultadoRegla(1, "CS: blanca < magenta y bajando", False,
+                               "dato no disponible (indicador CS aun calculando)")
     abajo = lectura.cs_blanca < lectura.cs_magenta
     bajando = lectura.cs_blanca < lectura.cs_blanca_prev
     cumple = abajo and bajando
@@ -266,6 +278,9 @@ def regla5_tsd_short(lectura: LecturaIndicadores) -> ResultadoRegla:
 
 
 def regla6_bbcloud_short(lectura: LecturaIndicadores) -> ResultadoRegla:
+    if lectura.bb_superior is None:
+        return ResultadoRegla(6, "Precio <= banda superior BB Cloud", False,
+                               "dato no disponible (indicador BBCloud aun calculando)")
     cumple = lectura.precio <= lectura.bb_superior
     return ResultadoRegla(6, "Precio <= banda superior BB Cloud", cumple,
                            f"precio={lectura.precio:.2f} banda_superior={lectura.bb_superior:.2f}")

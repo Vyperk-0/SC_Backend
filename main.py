@@ -57,16 +57,16 @@ class IndicadoresPayload(BaseModel):
     timeframe: str
     precio: float
 
-    cs_magenta: float
-    cs_blanca: float
-    cs_blanca_prev: float
+    cs_magenta: Optional[float] = None
+    cs_blanca: Optional[float] = None
+    cs_blanca_prev: Optional[float] = None
 
     tt_darkgreen: Optional[float] = None
     tt_maroon: Optional[float] = None
     tt_lime: Optional[float] = None
     tt_red: Optional[float] = None
 
-    trvi_valor: float
+    trvi_valor: Optional[float] = None
 
     trwave_darkgreen: Optional[float] = None
     trwave_maroon: Optional[float] = None
@@ -76,8 +76,8 @@ class IndicadoresPayload(BaseModel):
     tsd_aqua: Optional[float] = None
     tsd_yellow: Optional[float] = None
 
-    bb_inferior: float
-    bb_superior: float
+    bb_inferior: Optional[float] = None
+    bb_superior: Optional[float] = None
 
     # Opcional: si el EA tambien manda la lectura del timeframe
     # superior en el mismo request, se puede evaluar Type 2 de una vez.
