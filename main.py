@@ -432,11 +432,13 @@ def panel_unificado():
   .badge-ok { color: var(--long); font-weight: 700; }
   .badge-off { color: var(--text-muted); }
 
-  .grupo-activo { margin-bottom: 1.4rem; padding-bottom: 1.2rem; border-bottom: 1px solid var(--border); }
-  .grupo-activo:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .grupo-activo {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.1rem 1.2rem; margin-bottom: 0.9rem;
+  }
   .grupo-activo-titulo {
     font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.98rem;
-    color: var(--accent); margin-bottom: 0.5rem; letter-spacing: 0.02em;
+    color: var(--accent); margin-bottom: 0.6rem; letter-spacing: 0.02em;
   }
 
   .mobile-tabs { display: none; }
@@ -534,16 +536,15 @@ def panel_unificado():
     <!-- PANEL 4: EN VIVO -->
     <div class="panel" id="panel-vivo">
       <div class="panel-header">
-        <h2>Estado en vivo</h2>
-        <p>Cumplimiento de reglas ahora mismo, segun los ultimos datos que mando el EA. Se actualiza sola cada 20s.</p>
-      </div>
-      <div class="card">
         <div class="section-title-row">
-          <h3 style="margin:0">Pares monitoreados</h3>
+          <div>
+            <h2 style="margin:0 0 0.3rem">Estado en vivo</h2>
+            <p style="margin:0">Cumplimiento de reglas ahora mismo. Se actualiza sola cada 20s.</p>
+          </div>
           <button class="ghost" onclick="cargarEstadoVivo()">Actualizar</button>
         </div>
-        <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
       </div>
+      <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
     </div>
 
   </div>
