@@ -866,6 +866,36 @@ def estado_vivo():
     return {"pares": resultado}
 
 
+class HistoricoBarra(BaseModel):
+    """Una vela de historico, tal como la manda el script de MT4 vía JSON."""
+    time: str  # formato ISO: "YYYY-MM-DDTHH:MM"
+    open: float
+    high: float
+    low: float
+    close: float
+    cs_magenta: Optional[float] = None
+    cs_blanca: Optional[float] = None
+    tt_darkgreen: Optional[float] = None
+    tt_maroon: Optional[float] = None
+    tt_lime: Optional[float] = None
+    tt_red: Optional[float] = None
+    trvi_valor: Optional[float] = None
+    trwave_darkgreen: Optional[float] = None
+    trwave_maroon: Optional[float] = None
+    trwave_lime: Optional[float] = None
+    trwave_red: Optional[float] = None
+    tsd_aqua: Optional[float] = None
+    tsd_yellow: Optional[float] = None
+    bb_inferior: Optional[float] = None
+    bb_superior: Optional[float] = None
+
+
+class HistoricoLotePayload(BaseModel):
+    symbol: str
+    timeframe: str
+    filas: List[HistoricoBarra]
+
+
 # =====================================================================
 # HISTORICO Y BACKTESTING (viven en Railway, no dependen de la PC)
 # =====================================================================
@@ -873,6 +903,24 @@ def estado_vivo():
 def _parse_float_csv(valor: str) -> Optional[float]:
     valor = (valor or "").strip()
     return None if valor == "" else float(valor)
+
+
+@app.post("/historico/upload-json")
+def subir_historico_json(payload: HistoricoLotePayload):
+    """
+    Recibe un LOTE de velas directo en JSON (sin pasar por CSV) y las
+    guarda en Postgres. Pensado para que UPS_Historico_Export.mq4
+    mande los datos directo por WebRequest, en varios lotes, sin que
+    el usuario tenga que exportar/arrastrar ningun archivo.
+    """
+    filas = [f.dict() for f in payload.filas]
+
+    try:
+        total = db.guardar_historico(payload.symbol, payload.timeframe, filas)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error guardando en Postgres: {e}")
+
+    return {"symbol": payload.symbol, "timeframe": payload.timeframe, "velas_guardadas": total}
 
 
 @app.post("/historico/upload")
