@@ -23,6 +23,7 @@ from typing import Optional, List
 import logging
 import io
 import csv
+from datetime import datetime, timezone
 
 from ups_rules_engine import (
     LecturaIndicadores,
@@ -180,6 +181,14 @@ def evaluacion_a_out(r: ResultadoEvaluacion, niveles: dict = None) -> Evaluacion
 # por el usuario; por ahora vacia = no manda alertas todavia.
 PARES_VIGILADOS: List[str] = []
 
+# Estado en vivo: guarda el ULTIMO resultado calculado para cada
+# combinacion (symbol, timeframe), asi el panel puede mostrarlo sin
+# tener que esperar a un nuevo request del EA. Vive en memoria (se
+# reinicia si Railway redeploya el servicio) - el EA lo vuelve a
+# llenar solo en el siguiente ciclo (60s), asi que no es un problema
+# real en la practica.
+ESTADO_VIVO: dict = {}
+
 
 def procesar_senal_para_alerta(evaluacion: ResultadoEvaluacion, niveles: dict):
     """
@@ -253,6 +262,26 @@ def recibir_indicadores(payload: IndicadoresPayload):
 
         respuesta.long_type2 = evaluacion_a_out(eval_long_2, niveles_long_2)
         respuesta.short_type2 = evaluacion_a_out(eval_short_2, niveles_short_2)
+
+    # Guardar el resultado en el estado en vivo, para que el panel
+    # pueda mostrarlo sin depender de leer los Logs de Railway.
+    clave = (payload.symbol, payload.timeframe)
+    ESTADO_VIVO[clave] = {
+        "symbol": payload.symbol,
+        "timeframe": payload.timeframe,
+        "precio": payload.precio,
+        "long_t1": f"{eval_long_1.reglas_cumplidas}/{eval_long_1.total_reglas}",
+        "short_t1": f"{eval_short_1.reglas_cumplidas}/{eval_short_1.total_reglas}",
+        "long_t1_completa": eval_long_1.senal_completa,
+        "short_t1_completa": eval_short_1.senal_completa,
+        "long_t2": (f"{respuesta.long_type2.reglas_cumplidas}/{respuesta.long_type2.total_reglas}"
+                    if respuesta.long_type2 else None),
+        "short_t2": (f"{respuesta.short_type2.reglas_cumplidas}/{respuesta.short_type2.total_reglas}"
+                     if respuesta.short_type2 else None),
+        "long_t2_completa": respuesta.long_type2.senal_completa if respuesta.long_type2 else False,
+        "short_t2_completa": respuesta.short_type2.senal_completa if respuesta.short_type2 else False,
+        "actualizado": datetime.now(timezone.utc),
+    }
 
     return respuesta
 
@@ -353,6 +382,16 @@ def panel_unificado():
     <button id="btn-backtest">Correr backtest</button>
     <div id="estado-backtest"></div>
     <div id="resultado-backtest"></div>
+  </div>
+
+  <!-- ESTADO EN VIVO -->
+  <div class="card">
+    <h2>4. Estado en vivo <button class="refresh" onclick="cargarEstadoVivo()">↻ Actualizar</button></h2>
+    <p style="color:#64748b; font-size:0.78rem; margin:0 0 0.5rem;">
+      Cumplimiento de reglas ahora mismo, segun los ultimos datos que mando el EA.
+      Se actualiza sola cada 20s.
+    </p>
+    <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
   </div>
 
 </div>
@@ -515,6 +554,55 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
 
 // Cargar la lista de disponibles apenas abre la pagina
 cargarDisponibles();
+
+// ---------- ESTADO EN VIVO ----------
+function formatearTiempo(segundos) {
+  if (segundos < 90) return segundos + "s";
+  const min = Math.round(segundos / 60);
+  if (min < 90) return min + "min";
+  const horas = Math.round(min / 60);
+  return horas + "h";
+}
+
+function badgeSenal(cumplimiento, completa) {
+  const color = completa ? "#4ade80" : "#94a3b8";
+  const marca = completa ? " ✓" : "";
+  return `<span style="color:${color}; font-weight:${completa ? '700' : '400'}">${cumplimiento}${marca}</span>`;
+}
+
+async function cargarEstadoVivo() {
+  const cont = document.getElementById('tabla-vivo');
+  try {
+    const resp = await fetch('/estado-vivo');
+    const data = await resp.json();
+    const pares = data.pares || [];
+
+    if (pares.length === 0) {
+      cont.innerHTML = '<p class="vacio">Aun no llego ningun dato del EA.</p>';
+      return;
+    }
+
+    let html = '<table><tr><th>Par</th><th>TF</th><th>Long T1</th><th>Short T1</th><th>Long T2</th><th>Short T2</th><th>Hace</th></tr>';
+    for (const p of pares) {
+      const antiguo = p.actualizado_hace_segundos > 180;
+      html += `<tr style="${antiguo ? 'opacity:0.5' : ''}">
+                 <td>${p.symbol}</td><td>${p.timeframe}</td>
+                 <td>${badgeSenal(p.long_t1, p.long_t1_completa)}</td>
+                 <td>${badgeSenal(p.short_t1, p.short_t1_completa)}</td>
+                 <td>${p.long_t2 ? badgeSenal(p.long_t2, p.long_t2_completa) : '-'}</td>
+                 <td>${p.short_t2 ? badgeSenal(p.short_t2, p.short_t2_completa) : '-'}</td>
+                 <td>${formatearTiempo(p.actualizado_hace_segundos)}</td>
+               </tr>`;
+    }
+    html += '</table>';
+    cont.innerHTML = html;
+  } catch (err) {
+    cont.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
+  }
+}
+
+cargarEstadoVivo();
+setInterval(cargarEstadoVivo, 20000);
 </script>
 </body>
 </html>
@@ -526,6 +614,34 @@ cargarDisponibles();
 @app.get("/pares-vigilados")
 def obtener_pares_vigilados():
     return {"pares": PARES_VIGILADOS}
+
+
+@app.get("/estado-vivo")
+def estado_vivo():
+    """
+    Devuelve el ultimo resultado calculado para cada par/timeframe que
+    el EA haya mandado, junto con hace cuanto se actualizo (para saber
+    si el dato esta fresco o si el EA dejo de mandar datos).
+    """
+    ahora = datetime.now(timezone.utc)
+    resultado = []
+    for (symbol, timeframe), datos in sorted(ESTADO_VIVO.items()):
+        segundos = (ahora - datos["actualizado"]).total_seconds()
+        resultado.append({
+            "symbol": datos["symbol"],
+            "timeframe": datos["timeframe"],
+            "precio": datos["precio"],
+            "long_t1": datos["long_t1"],
+            "short_t1": datos["short_t1"],
+            "long_t1_completa": datos["long_t1_completa"],
+            "short_t1_completa": datos["short_t1_completa"],
+            "long_t2": datos["long_t2"],
+            "short_t2": datos["short_t2"],
+            "long_t2_completa": datos["long_t2_completa"],
+            "short_t2_completa": datos["short_t2_completa"],
+            "actualizado_hace_segundos": round(segundos),
+        })
+    return {"pares": resultado}
 
 
 # =====================================================================
