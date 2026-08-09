@@ -366,7 +366,7 @@ def panel_unificado():
   }
 
   /* ---------- MAIN ---------- */
-  .main { flex: 1; padding: 2rem 2.2rem; max-width: 900px; }
+  .main { flex: 1; padding: 2rem 2.5rem; max-width: 1600px; margin: 0 auto; width: 100%; }
   .panel { display: none; }
   .panel.activo { display: block; animation: fade 0.25s ease; }
   @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -441,7 +441,7 @@ def panel_unificado():
   .badge-short { color: var(--short); font-weight: 700; }
 
   #tabla-vivo {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.7rem;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.8rem;
   }
   .grupo-activo {
     background: var(--surface); border: 1px solid var(--border);
@@ -472,6 +472,12 @@ def panel_unificado():
 
   .mobile-tabs { display: none; }
 
+  /* Pantallas medianas/tablet: sidebar mas angosto, tarjetas se acomodan solas via el grid */
+  @media (max-width: 1100px) and (min-width: 781px) {
+    .sidebar { width: 180px; padding: 1.2rem 0.7rem; }
+    .main { padding: 1.6rem 1.4rem; }
+  }
+
   @media (max-width: 780px) {
     .layout { flex-direction: column; }
     .sidebar {
@@ -482,6 +488,7 @@ def panel_unificado():
     .nav-item { flex-shrink: 0; }
     .main { padding: 1.3rem 1rem; max-width: 100%; }
     .stats-grid { grid-template-columns: 1fr; }
+    #tabla-vivo { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem; }
   }
 </style>
 </head>
