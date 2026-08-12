@@ -440,6 +440,17 @@ def panel_unificado():
   .leyenda b { color: var(--text); }
   .badge-short { color: var(--short); font-weight: 700; }
 
+  .filtros {
+    display: flex; gap: 0.6rem; margin: 1rem 0 1rem; flex-wrap: wrap;
+  }
+  .filtros input[type=text] { flex: 1; min-width: 180px; margin: 0; }
+  .filtros select {
+    padding: 0.6rem 0.7rem; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif;
+    font-size: 0.85rem; cursor: pointer;
+  }
+  .filtros select:focus { outline: none; border-color: var(--accent-dim); }
+
   #tabla-vivo, #tabla-resumen {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.8rem;
   }
@@ -533,6 +544,17 @@ def panel_unificado():
           <span><b>Neto</b> = pips acumulados (positivo = ganancia)</span>
         </div>
       </div>
+      <div class="filtros">
+        <input type="text" id="buscar-resumen" placeholder="Buscar simbolo..." oninput="aplicarFiltro('tabla-resumen','buscar-resumen','categoria-resumen')">
+        <select id="categoria-resumen" onchange="aplicarFiltro('tabla-resumen','buscar-resumen','categoria-resumen')">
+          <option value="">Todas las categorias</option>
+          <option value="Shares US">Shares US</option>
+          <option value="Forex">Forex</option>
+          <option value="Oro">Oro</option>
+          <option value="Silver">Silver</option>
+          <option value="Crypto">Crypto</option>
+        </select>
+      </div>
       <div id="tabla-resumen"><p class="vacio">Toca "Cargar resultados" para calcular (puede tardar segun cuantos activos tengas cargados).</p></div>
     </div>
 
@@ -603,6 +625,17 @@ def panel_unificado():
           <span><span class="badge-ok">&check;</span> = todas las reglas cumplidas</span>
         </div>
       </div>
+      <div class="filtros">
+        <input type="text" id="buscar-vivo" placeholder="Buscar simbolo..." oninput="aplicarFiltro('tabla-vivo','buscar-vivo','categoria-vivo')">
+        <select id="categoria-vivo" onchange="aplicarFiltro('tabla-vivo','buscar-vivo','categoria-vivo')">
+          <option value="">Todas las categorias</option>
+          <option value="Shares US">Shares US</option>
+          <option value="Forex">Forex</option>
+          <option value="Oro">Oro</option>
+          <option value="Silver">Silver</option>
+          <option value="Crypto">Crypto</option>
+        </select>
+      </div>
       <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
     </div>
 
@@ -610,6 +643,71 @@ def panel_unificado():
 </div>
 
 <script>
+// ---------- MAPA DE CATEGORIAS (para buscador y filtros) ----------
+const CATEGORIAS = {
+  "ADOBE":"Shares US","ALCOA":"Shares US","ALIBABA":"Shares US","AMAZON":"Shares US","AMD":"Shares US",
+  "AMEX":"Shares US","APPLE":"Shares US","BOA":"Shares US","BOEING":"Shares US","BOOKING":"Shares US",
+  "CHEVRON":"Shares US","CISCO":"Shares US","CITI":"Shares US","COKE":"Shares US","Coinbase":"Shares US",
+  "DEVON":"Shares US","DISNEY":"Shares US","EBAY":"Shares US","EXXON":"Shares US","FORD":"Shares US",
+  "GE":"Shares US","GOOGLE":"Shares US","GS":"Shares US","HLT":"Shares US","IBM":"Shares US",
+  "ILMN":"Shares US","INTEL":"Shares US","JNJ":"Shares US","JPMORGAN":"Shares US","LAM":"Shares US",
+  "MCARD":"Shares US","MCDON":"Shares US","META":"Shares US","MICROCHIP":"Shares US","MICRON":"Shares US",
+  "MODERNA":"Shares US","MSFT":"Shares US","NIKE":"Shares US","NVIDIA":"Shares US","Netflix":"Shares US",
+  "PAYPAL":"Shares US","PEPSI":"Shares US","PFIZER":"Shares US","QCOM":"Shares US","SALESFORCE":"Shares US",
+  "STARBUCKS":"Shares US","TEVA":"Shares US","Tesla":"Shares US","UBER":"Shares US","VISA":"Shares US",
+  "AUDCAD":"Forex","AUDCHF":"Forex","AUDJPY":"Forex","AUDNZD":"Forex","AUDSGD":"Forex","AUDUSD":"Forex",
+  "CADCHF":"Forex","CADJPY":"Forex","CHFJPY":"Forex","CHFPLN":"Forex","CHFSGD":"Forex","EURAUD":"Forex",
+  "EURCAD":"Forex","EURCHF":"Forex","EURDKK":"Forex","EURGBP":"Forex","EURHUF":"Forex","EURJPY":"Forex",
+  "EURNOK":"Forex","EURNZD":"Forex","EURPLN":"Forex","EURSGD":"Forex","EURUSD":"Forex","EURZAR":"Forex",
+  "GBPAUD":"Forex","GBPCAD":"Forex","GBPCHF":"Forex","GBPJPY":"Forex","GBPNZD":"Forex","GBPPLN":"Forex",
+  "GBPSGD":"Forex","GBPUSD":"Forex","GBPZAR":"Forex","NZDCAD":"Forex","NZDCHF":"Forex","NZDJPY":"Forex",
+  "NZDUSD":"Forex","SGDJPY":"Forex","USDAED":"Forex","USDAEDr":"Forex","USDCAD":"Forex","USDCHF":"Forex",
+  "USDCNH":"Forex","USDCZK":"Forex","USDDKK":"Forex","USDGHS":"Forex","USDHKD":"Forex","USDHUF":"Forex",
+  "USDIDR":"Forex","USDJPY":"Forex","USDKES":"Forex","USDMXN":"Forex","USDNGN":"Forex","USDNOK":"Forex",
+  "USDPLN":"Forex","USDRUB":"Forex","USDSEK":"Forex","USDSGD":"Forex","USDTHB":"Forex","USDTRY":"Forex",
+  "USDZAR":"Forex","ZARJPY":"Forex",
+  "XAUEUR":"Oro","XAUUSD":"Oro",
+  "XAGEUR":"Silver","XAGUSD":"Silver",
+  "#ADAUSDr":"Crypto","#BNBEURr":"Crypto","#BNBJPYr":"Crypto","#BNBUSDr":"Crypto","#BTCEURr":"Crypto",
+  "#BTCJPYr":"Crypto","#BTCUSDr":"Crypto","#DOGEUSDr":"Crypto","#ETHUSDr":"Crypto","#LTCUSDr":"Crypto",
+  "#SOLUSDr":"Crypto","#TRXUSDr":"Crypto","#XRPEURr":"Crypto","#XRPUSDr":"Crypto"
+};
+
+function obtenerCategoria(symbol) {
+  return CATEGORIAS[symbol] || "Otros";
+}
+
+function aplicarFiltro(containerId, buscarId, categoriaId) {
+  const texto = document.getElementById(buscarId).value.trim().toUpperCase();
+  const categoria = document.getElementById(categoriaId).value;
+  const tarjetas = document.querySelectorAll(`#${containerId} .grupo-activo`);
+  let visibles = 0;
+
+  tarjetas.forEach(t => {
+    const symbol = (t.dataset.symbol || '').toUpperCase();
+    const cat = t.dataset.categoria || '';
+    const coincideTexto = texto === '' || symbol.includes(texto);
+    const coincideCategoria = categoria === '' || cat === categoria;
+    const mostrar = coincideTexto && coincideCategoria;
+    t.style.display = mostrar ? '' : 'none';
+    if (mostrar) visibles++;
+  });
+
+  const msgId = containerId + '-sin-resultados';
+  let msg = document.getElementById(msgId);
+  if (visibles === 0 && tarjetas.length > 0) {
+    if (!msg) {
+      msg = document.createElement('p');
+      msg.id = msgId;
+      msg.className = 'vacio';
+      msg.textContent = 'Ningun activo coincide con el filtro.';
+      document.getElementById(containerId).appendChild(msg);
+    }
+  } else if (msg) {
+    msg.remove();
+  }
+}
+
 // ---------- NAVEGACION DE PESTANAS ----------
 function cambiarTab(tab) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('activo'));
@@ -837,7 +935,7 @@ async function cargarResumenBacktest() {
 
     let html = '';
     for (const symbol of Object.keys(grupos).sort()) {
-      html += `<div class="grupo-activo">
+      html += `<div class="grupo-activo" data-symbol="${symbol}" data-categoria="${obtenerCategoria(symbol)}">
                  <div class="grupo-activo-titulo">${symbol}</div>`;
       for (const r of grupos[symbol]) {
         html += bloqueResultado(r);
@@ -845,6 +943,7 @@ async function cargarResumenBacktest() {
       html += '</div>';
     }
     cont.innerHTML = html;
+    aplicarFiltro('tabla-resumen', 'buscar-resumen', 'categoria-resumen');
   } catch (err) {
     cont.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
   }
@@ -899,7 +998,7 @@ async function cargarEstadoVivo() {
 
     let html = '';
     for (const symbol of Object.keys(grupos).sort()) {
-      html += `<div class="grupo-activo">
+      html += `<div class="grupo-activo" data-symbol="${symbol}" data-categoria="${obtenerCategoria(symbol)}">
                  <div class="grupo-activo-titulo">${symbol}</div>`;
       for (const p of grupos[symbol]) {
         html += bloqueTimeframe(p);
@@ -907,6 +1006,7 @@ async function cargarEstadoVivo() {
       html += '</div>';
     }
     cont.innerHTML = html;
+    aplicarFiltro('tabla-vivo', 'buscar-vivo', 'categoria-vivo');
   } catch (err) {
     cont.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
   }
