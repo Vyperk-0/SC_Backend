@@ -265,6 +265,12 @@ def recibir_indicadores(payload: IndicadoresPayload):
 
     # Guardar el resultado en el estado en vivo, para que el panel
     # pueda mostrarlo sin depender de leer los Logs de Railway.
+    # Se guarda el desglose COMPLETO de reglas (no solo el resumen)
+    # para poder abrir el detalle de cada activo en el panel.
+    def reglas_a_dict(reglas):
+        return [{"numero": r.numero, "descripcion": r.descripcion,
+                  "cumple": r.cumple, "detalle": r.detalle} for r in reglas]
+
     clave = (payload.symbol, payload.timeframe)
     ESTADO_VIVO[clave] = {
         "symbol": payload.symbol,
@@ -274,12 +280,18 @@ def recibir_indicadores(payload: IndicadoresPayload):
         "short_t1": f"{eval_short_1.reglas_cumplidas}/{eval_short_1.total_reglas}",
         "long_t1_completa": eval_long_1.senal_completa,
         "short_t1_completa": eval_short_1.senal_completa,
+        "long_t1_reglas": reglas_a_dict(eval_long_1.reglas),
+        "short_t1_reglas": reglas_a_dict(eval_short_1.reglas),
         "long_t2": (f"{respuesta.long_type2.reglas_cumplidas}/{respuesta.long_type2.total_reglas}"
                     if respuesta.long_type2 else None),
         "short_t2": (f"{respuesta.short_type2.reglas_cumplidas}/{respuesta.short_type2.total_reglas}"
                      if respuesta.short_type2 else None),
         "long_t2_completa": respuesta.long_type2.senal_completa if respuesta.long_type2 else False,
         "short_t2_completa": respuesta.short_type2.senal_completa if respuesta.short_type2 else False,
+        "long_t2_reglas": reglas_a_dict(eval_long_2.reglas) if payload.tf_superior else None,
+        "short_t2_reglas": reglas_a_dict(eval_short_2.reglas) if payload.tf_superior else None,
+        "niveles_long": niveles_long if eval_long_1.senal_completa else None,
+        "niveles_short": niveles_short if eval_short_1.senal_completa else None,
         "actualizado": datetime.now(timezone.utc),
     }
 
@@ -481,6 +493,56 @@ def panel_unificado():
   .flecha-short { color: var(--text-muted); }
   .flecha-short.completa { color: var(--short); font-weight: 700; }
 
+  .clickable-titulo { cursor: pointer; }
+  .clickable-titulo:hover { text-decoration: underline; }
+
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 100; align-items: center; justify-content: center; padding: 1rem;
+  }
+  .modal-overlay.activo { display: flex; }
+  .modal-caja {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    max-width: 640px; width: 100%; max-height: 85vh; overflow-y: auto;
+    padding: 1.4rem 1.5rem;
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 1rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--border);
+  }
+  .modal-header h2 { margin: 0; font-size: 1.2rem; color: var(--accent); }
+  .modal-cerrar {
+    background: none; border: none; color: var(--text-muted); font-size: 1.5rem;
+    cursor: pointer; padding: 0; line-height: 1; width: auto;
+  }
+  .modal-cerrar:hover { color: var(--text); }
+
+  .detalle-tf { margin-bottom: 1.3rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--border); }
+  .detalle-tf:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .detalle-tf-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.7rem; }
+  .detalle-tf-header .tf-nombre-grande { font-size: 1.05rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .detalle-precio { font-size: 0.8rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+  .detalle-direccion { margin-bottom: 0.8rem; }
+  .detalle-direccion-titulo {
+    font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem;
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .detalle-regla {
+    display: flex; gap: 0.5rem; font-size: 0.78rem; padding: 0.25rem 0;
+    align-items: flex-start; color: var(--text-muted);
+  }
+  .detalle-regla .icono { flex-shrink: 0; width: 16px; }
+  .detalle-regla.cumple .icono { color: var(--long); }
+  .detalle-regla:not(.cumple) .icono { color: var(--text-muted); }
+  .detalle-regla-texto b { color: var(--text); font-weight: 500; }
+  .detalle-regla-texto .detalle-sub { display: block; color: var(--text-muted); font-size: 0.72rem; margin-top: 0.1rem; }
+
+  .detalle-niveles {
+    background: var(--bg); border-radius: 8px; padding: 0.6rem 0.8rem; margin-top: 0.5rem;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; display: flex; gap: 1.2rem;
+  }
+
   .mobile-tabs { display: none; }
 
   /* Pantallas medianas/tablet: sidebar mas angosto, tarjetas se acomodan solas via el grid */
@@ -629,6 +691,17 @@ def panel_unificado():
       <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
     </div>
 
+  </div>
+</div>
+
+<!-- MODAL DE DETALLE (En vivo) -->
+<div id="modal-overlay" class="modal-overlay" onclick="cerrarModalDetalle(event)">
+  <div class="modal-caja" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="modal-titulo">-</h2>
+      <button class="modal-cerrar" onclick="cerrarModalDetalle()">&times;</button>
+    </div>
+    <div id="modal-contenido"><p class="vacio">Cargando...</p></div>
   </div>
 </div>
 
@@ -942,6 +1015,83 @@ async function cargarResumenBacktest() {
   btn.textContent = "Cargar resultados";
 }
 
+// ---------- MODAL DE DETALLE (En vivo) ----------
+function iconoRegla(cumple) {
+  return cumple ? '&check;' : '&#9675;';
+}
+
+function bloqueReglasDetalle(titulo, colorClase, reglas, completa) {
+  let html = `<div class="detalle-direccion">
+                <div class="detalle-direccion-titulo ${completa ? 'badge-ok' : ''}">${titulo} ${completa ? '&check; SEÑAL COMPLETA' : ''}</div>`;
+  for (const r of reglas) {
+    html += `<div class="detalle-regla ${r.cumple ? 'cumple' : ''}">
+                <span class="icono">${iconoRegla(r.cumple)}</span>
+                <span class="detalle-regla-texto"><b>R${r.numero}: ${r.descripcion}</b>
+                  <span class="detalle-sub">${r.detalle}</span>
+                </span>
+              </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function bloqueNiveles(niveles) {
+  if (!niveles || niveles.error) return '';
+  return `<div class="detalle-niveles">
+            <span>Entry: <b>${niveles.entry?.toFixed(5) ?? '-'}</b></span>
+            <span>SL: <b>${niveles.sl?.toFixed(5) ?? '-'}</b></span>
+            <span>TP: <b>${niveles.tp?.toFixed(5) ?? '-'}</b></span>
+          </div>`;
+}
+
+async function abrirDetalleVivo(symbol) {
+  const overlay = document.getElementById('modal-overlay');
+  const titulo = document.getElementById('modal-titulo');
+  const contenido = document.getElementById('modal-contenido');
+
+  titulo.textContent = symbol;
+  contenido.innerHTML = '<p class="vacio">Cargando...</p>';
+  overlay.classList.add('activo');
+
+  try {
+    const resp = await fetch(`/estado-vivo/detalle?symbol=${encodeURIComponent(symbol)}`);
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      contenido.innerHTML = '<p class="vacio error">' + (data.detail || 'Error') + '</p>';
+      return;
+    }
+
+    let html = '';
+    for (const tf of data.timeframes) {
+      html += `<div class="detalle-tf">
+                 <div class="detalle-tf-header">
+                   <span class="tf-nombre-grande">${tf.timeframe}</span>
+                   <span class="detalle-precio">precio ${tf.precio} · hace ${formatearTiempo(tf.actualizado_hace_segundos)}</span>
+                 </div>`;
+      html += bloqueReglasDetalle('↑ Long Type 1', 'long', tf.long_t1_reglas, tf.long_t1_completa);
+      html += bloqueNiveles(tf.niveles_long);
+      html += bloqueReglasDetalle('↓ Short Type 1', 'short', tf.short_t1_reglas, tf.short_t1_completa);
+      html += bloqueNiveles(tf.niveles_short);
+      if (tf.long_t2_reglas) {
+        html += bloqueReglasDetalle('↑ Long Type 2', 'long', tf.long_t2_reglas, tf.long_t2_completa);
+      }
+      if (tf.short_t2_reglas) {
+        html += bloqueReglasDetalle('↓ Short Type 2', 'short', tf.short_t2_reglas, tf.short_t2_completa);
+      }
+      html += '</div>';
+    }
+    contenido.innerHTML = html;
+  } catch (err) {
+    contenido.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
+  }
+}
+
+function cerrarModalDetalle(event) {
+  if (event && event.target !== event.currentTarget) return;
+  document.getElementById('modal-overlay').classList.remove('activo');
+}
+
 function bloqueTimeframe(p) {
   const antiguo = p.actualizado_hace_segundos > 180;
   let html = `<div class="tf-block" style="${antiguo ? 'opacity:0.4' : ''}">
@@ -989,7 +1139,7 @@ async function cargarEstadoVivo() {
     let html = '';
     for (const symbol of Object.keys(grupos).sort()) {
       html += `<div class="grupo-activo" data-symbol="${symbol}" data-categoria="${obtenerCategoria(symbol)}">
-                 <div class="grupo-activo-titulo">${symbol}</div>`;
+                 <div class="grupo-activo-titulo clickable-titulo" onclick="abrirDetalleVivo('${symbol}')">${symbol}</div>`;
       for (const p of grupos[symbol]) {
         html += bloqueTimeframe(p);
       }
@@ -1042,6 +1192,42 @@ def estado_vivo():
             "actualizado_hace_segundos": round(segundos),
         })
     return {"pares": resultado}
+
+
+@app.get("/estado-vivo/detalle")
+def estado_vivo_detalle(symbol: str = Query(...)):
+    """
+    Devuelve el desglose COMPLETO (regla por regla, con su detalle en
+    texto) de todos los timeframes de un simbolo, para el panel de
+    detalle al hacer clic en un activo en 'En vivo'.
+    """
+    ahora = datetime.now(timezone.utc)
+    resultado = []
+
+    for (s, timeframe), datos in sorted(ESTADO_VIVO.items()):
+        if s != symbol:
+            continue
+        segundos = (ahora - datos["actualizado"]).total_seconds()
+        resultado.append({
+            "timeframe": datos["timeframe"],
+            "precio": datos["precio"],
+            "actualizado_hace_segundos": round(segundos),
+            "long_t1_completa": datos["long_t1_completa"],
+            "short_t1_completa": datos["short_t1_completa"],
+            "long_t1_reglas": datos["long_t1_reglas"],
+            "short_t1_reglas": datos["short_t1_reglas"],
+            "long_t2_completa": datos["long_t2_completa"],
+            "short_t2_completa": datos["short_t2_completa"],
+            "long_t2_reglas": datos["long_t2_reglas"],
+            "short_t2_reglas": datos["short_t2_reglas"],
+            "niveles_long": datos["niveles_long"],
+            "niveles_short": datos["niveles_short"],
+        })
+
+    if not resultado:
+        raise HTTPException(status_code=404, detail=f"No hay datos en vivo para {symbol}")
+
+    return {"symbol": symbol, "timeframes": resultado}
 
 
 class HistoricoBarra(BaseModel):
