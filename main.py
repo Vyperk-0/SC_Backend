@@ -292,6 +292,18 @@ def recibir_indicadores(payload: IndicadoresPayload):
         "short_t2_reglas": reglas_a_dict(eval_short_2.reglas) if payload.tf_superior else None,
         "niveles_long": niveles_long if eval_long_1.senal_completa else None,
         "niveles_short": niveles_short if eval_short_1.senal_completa else None,
+        # Valores crudos de cada indicador, para la pagina de detalle
+        # (mostrar el indicador en si, no solo el resultado de la regla).
+        "indicadores": {
+            "cs_magenta": lectura.cs_magenta, "cs_blanca": lectura.cs_blanca,
+            "tt_darkgreen": lectura.tt_darkgreen, "tt_maroon": lectura.tt_maroon,
+            "tt_lime": lectura.tt_lime, "tt_red": lectura.tt_red,
+            "trvi_valor": lectura.trvi_valor,
+            "trwave_darkgreen": lectura.trwave_darkgreen, "trwave_maroon": lectura.trwave_maroon,
+            "trwave_lime": lectura.trwave_lime, "trwave_red": lectura.trwave_red,
+            "tsd_aqua": lectura.tsd_aqua, "tsd_yellow": lectura.tsd_yellow,
+            "bb_inferior": lectura.bb_inferior, "bb_superior": lectura.bb_superior,
+        },
         "actualizado": datetime.now(timezone.utc),
     }
 
@@ -494,53 +506,82 @@ def panel_unificado():
   .flecha-short.completa { color: var(--short); font-weight: 700; }
 
   .clickable-titulo { cursor: pointer; }
-  .clickable-titulo:hover { text-decoration: underline; }
+  .clickable-titulo:hover { color: var(--accent); }
 
-  .modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-    z-index: 100; align-items: center; justify-content: center; padding: 1rem;
+  /* ---------- PAGINA DE DETALLE POR ACTIVO ---------- */
+  #panel-detalle { }
+  .detalle-topbar {
+    display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;
   }
-  .modal-overlay.activo { display: flex; }
-  .modal-caja {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    max-width: 640px; width: 100%; max-height: 85vh; overflow-y: auto;
-    padding: 1.4rem 1.5rem;
+  .detalle-topbar h2 {
+    margin: 0; font-size: 1.4rem; font-family: 'JetBrains Mono', monospace; color: var(--accent);
   }
-  .modal-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 1rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--border);
-  }
-  .modal-header h2 { margin: 0; font-size: 1.2rem; color: var(--accent); }
-  .modal-cerrar {
-    background: none; border: none; color: var(--text-muted); font-size: 1.5rem;
-    cursor: pointer; padding: 0; line-height: 1; width: auto;
-  }
-  .modal-cerrar:hover { color: var(--text); }
 
-  .detalle-tf { margin-bottom: 1.3rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--border); }
-  .detalle-tf:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-  .detalle-tf-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.7rem; }
-  .detalle-tf-header .tf-nombre-grande { font-size: 1.05rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-  .detalle-precio { font-size: 0.8rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+  .tf-pills { display: flex; gap: 0.5rem; margin-bottom: 1.3rem; flex-wrap: wrap; }
+  .tf-pill {
+    padding: 0.4rem 0.9rem; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-muted); font-size: 0.8rem;
+    font-family: 'JetBrains Mono', monospace; cursor: pointer; transition: 0.15s;
+  }
+  .tf-pill:hover { border-color: var(--accent-dim); }
+  .tf-pill.activo { background: var(--accent); color: #1A1200; border-color: var(--accent); font-weight: 700; }
 
-  .detalle-direccion { margin-bottom: 0.8rem; }
-  .detalle-direccion-titulo {
-    font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem;
+  .detalle-precio-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 1.2rem; padding-bottom: 0.9rem; border-bottom: 1px solid var(--border);
+  }
+  .detalle-precio-valor { font-size: 1.6rem; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+  .detalle-actualizado { font-size: 0.76rem; color: var(--text-muted); }
+
+  /* Grid de cajas, una por indicador */
+  .indicadores-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.8rem; margin-bottom: 1.3rem;
+  }
+  .indicador-box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.9rem 1rem;
+  }
+  .indicador-box .ind-nombre {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-muted); margin-bottom: 0.5rem;
+  }
+  .indicador-box .ind-valor-principal {
+    font-family: 'JetBrains Mono', monospace; font-size: 1.15rem; font-weight: 600;
     display: flex; align-items: center; gap: 0.4rem;
   }
-  .detalle-regla {
-    display: flex; gap: 0.5rem; font-size: 0.78rem; padding: 0.25rem 0;
-    align-items: flex-start; color: var(--text-muted);
+  .indicador-box .ind-sub {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.3rem;
   }
-  .detalle-regla .icono { flex-shrink: 0; width: 16px; }
-  .detalle-regla.cumple .icono { color: var(--long); }
-  .detalle-regla:not(.cumple) .icono { color: var(--text-muted); }
-  .detalle-regla-texto b { color: var(--text); font-weight: 500; }
-  .detalle-regla-texto .detalle-sub { display: block; color: var(--text-muted); font-size: 0.72rem; margin-top: 0.1rem; }
+  .ind-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .ind-dot.dg { background: #1a7a3a; } .ind-dot.mn { background: #7a1a1a; }
+  .ind-dot.li { background: #3ddc84; } .ind-dot.rd { background: #ff5c5c; }
+  .ind-dot.aq { background: #38bdf8; } .ind-dot.ye { background: #eab308; }
+  .ind-dot.off { background: var(--border); }
 
-  .detalle-niveles {
-    background: var(--bg); border-radius: 8px; padding: 0.6rem 0.8rem; margin-top: 0.5rem;
-    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; display: flex; gap: 1.2rem;
+  /* Resumen compacto de reglas: solo iconos, sin texto largo */
+  .reglas-resumen-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.8rem;
+  }
+  .reglas-box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem;
+  }
+  .reglas-box.completa { border-color: var(--long); }
+  .reglas-box-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;
+    font-size: 0.8rem; font-weight: 600;
+  }
+  .reglas-iconos { display: flex; gap: 0.35rem; }
+  .regla-icono {
+    width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center;
+    justify-content: center; font-size: 0.75rem; font-weight: 700;
+    background: var(--bg); color: var(--text-muted); border: 1px solid var(--border);
+  }
+  .regla-icono.ok { background: rgba(61,220,132,0.15); color: var(--long); border-color: var(--long); }
+  .reglas-box-niveles {
+    margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; color: var(--text-muted);
+    display: flex; gap: 1rem;
   }
 
   .mobile-tabs { display: none; }
@@ -691,17 +732,16 @@ def panel_unificado():
       <div id="tabla-vivo"><p class="vacio">Cargando...</p></div>
     </div>
 
-  </div>
-</div>
-
-<!-- MODAL DE DETALLE (En vivo) -->
-<div id="modal-overlay" class="modal-overlay" onclick="cerrarModalDetalle(event)">
-  <div class="modal-caja" onclick="event.stopPropagation()">
-    <div class="modal-header">
-      <h2 id="modal-titulo">-</h2>
-      <button class="modal-cerrar" onclick="cerrarModalDetalle()">&times;</button>
+    <!-- PANEL DE DETALLE (pagina dedicada por activo, no es una pestana del sidebar) -->
+    <div class="panel" id="panel-detalle">
+      <div class="detalle-topbar">
+        <button class="ghost" onclick="volverDeDetalle()">&larr; Volver</button>
+        <h2 id="detalle-titulo">-</h2>
+      </div>
+      <div class="tf-pills" id="detalle-tf-pills"></div>
+      <div id="detalle-contenido"><p class="vacio">Cargando...</p></div>
     </div>
-    <div id="modal-contenido"><p class="vacio">Cargando...</p></div>
+
   </div>
 </div>
 
@@ -1015,81 +1055,122 @@ async function cargarResumenBacktest() {
   btn.textContent = "Cargar resultados";
 }
 
-// ---------- MODAL DE DETALLE (En vivo) ----------
-function iconoRegla(cumple) {
-  return cumple ? '&check;' : '&#9675;';
+// ---------- PAGINA DE DETALLE POR ACTIVO ----------
+let _detalleData = null;
+
+function colorActivo(dg, mn, li, rd) {
+  if (dg !== null && dg !== 0) return { clase: 'dg', label: 'Dark Green', valor: dg };
+  if (mn !== null && mn !== 0) return { clase: 'mn', label: 'Maroon', valor: mn };
+  if (li !== null && li !== 0) return { clase: 'li', label: 'Light Green', valor: li };
+  if (rd !== null && rd !== 0) return { clase: 'rd', label: 'Light Red', valor: rd };
+  return { clase: 'off', label: 'Sin datos', valor: null };
 }
 
-function bloqueReglasDetalle(titulo, colorClase, reglas, completa) {
-  let html = `<div class="detalle-direccion">
-                <div class="detalle-direccion-titulo ${completa ? 'badge-ok' : ''}">${titulo} ${completa ? '&check; SEÑAL COMPLETA' : ''}</div>`;
+function cajaIndicador(nombre, valorHtml, subTexto) {
+  return `<div class="indicador-box">
+            <div class="ind-nombre">${nombre}</div>
+            <div class="ind-valor-principal">${valorHtml}</div>
+            ${subTexto ? `<div class="ind-sub">${subTexto}</div>` : ''}
+          </div>`;
+}
+
+function renderIndicadores(ind) {
+  const cs = `${ind.cs_blanca?.toFixed(2) ?? '-'} / ${ind.cs_magenta?.toFixed(2) ?? '-'}`;
+  const tt = colorActivo(ind.tt_darkgreen, ind.tt_maroon, ind.tt_lime, ind.tt_red);
+  const tw = colorActivo(ind.trwave_darkgreen, ind.trwave_maroon, ind.trwave_lime, ind.trwave_red);
+  const tsdValor = ind.tsd_aqua ?? ind.tsd_yellow;
+  const tsdDot = ind.tsd_aqua != null ? 'aq' : (ind.tsd_yellow != null ? 'ye' : 'off');
+  const tsdLabel = ind.tsd_aqua != null ? 'Aqua' : (ind.tsd_yellow != null ? 'Yellow' : 'Sin dato');
+
+  let html = '<div class="indicadores-grid">';
+  html += cajaIndicador('CS', cs, 'Blanca / Magenta');
+  html += cajaIndicador('TT', `<span class="ind-dot ${tt.clase}"></span>${tt.label}`, '');
+  html += cajaIndicador('TRVI', ind.trvi_valor?.toFixed(2) ?? '-', 'Volatilidad');
+  html += cajaIndicador('TR Wave', `<span class="ind-dot ${tw.clase}"></span>${tw.label}`, tw.valor?.toFixed(4) ?? '');
+  html += cajaIndicador('TSD', `<span class="ind-dot ${tsdDot}"></span>${tsdValor?.toFixed(5) ?? '-'}`, tsdLabel);
+  html += cajaIndicador('BB Cloud', ind.bb_inferior?.toFixed(5) ?? '-', `Sup: ${ind.bb_superior?.toFixed(5) ?? '-'}`);
+  html += '</div>';
+  return html;
+}
+
+function cajaReglas(titulo, reglas, completa, niveles) {
+  if (!reglas) return '';
+  const cumplidas = reglas.filter(r => r.cumple).length;
+  let html = `<div class="reglas-box ${completa ? 'completa' : ''}">
+                <div class="reglas-box-header"><span>${titulo}</span><span>${cumplidas}/${reglas.length}</span></div>
+                <div class="reglas-iconos">`;
   for (const r of reglas) {
-    html += `<div class="detalle-regla ${r.cumple ? 'cumple' : ''}">
-                <span class="icono">${iconoRegla(r.cumple)}</span>
-                <span class="detalle-regla-texto"><b>R${r.numero}: ${r.descripcion}</b>
-                  <span class="detalle-sub">${r.detalle}</span>
-                </span>
+    html += `<div class="regla-icono ${r.cumple ? 'ok' : ''}" title="${r.descripcion}: ${r.detalle}">${r.numero}</div>`;
+  }
+  html += '</div>';
+  if (niveles && !niveles.error) {
+    html += `<div class="reglas-box-niveles">
+                <span>E ${niveles.entry?.toFixed(5)}</span>
+                <span>SL ${niveles.sl?.toFixed(5)}</span>
+                <span>TP ${niveles.tp?.toFixed(5)}</span>
               </div>`;
   }
   html += '</div>';
   return html;
 }
 
-function bloqueNiveles(niveles) {
-  if (!niveles || niveles.error) return '';
-  return `<div class="detalle-niveles">
-            <span>Entry: <b>${niveles.entry?.toFixed(5) ?? '-'}</b></span>
-            <span>SL: <b>${niveles.sl?.toFixed(5) ?? '-'}</b></span>
-            <span>TP: <b>${niveles.tp?.toFixed(5) ?? '-'}</b></span>
-          </div>`;
+function renderDetalleTF(tf) {
+  const cont = document.getElementById('detalle-contenido');
+  let html = `<div class="detalle-precio-row">
+                <span class="detalle-precio-valor">${tf.precio}</span>
+                <span class="detalle-actualizado">hace ${formatearTiempo(tf.actualizado_hace_segundos)}</span>
+              </div>`;
+  html += renderIndicadores(tf.indicadores);
+  html += '<div class="reglas-resumen-grid">';
+  html += cajaReglas('&uarr; Long T1', tf.long_t1_reglas, tf.long_t1_completa, tf.niveles_long);
+  html += cajaReglas('&darr; Short T1', tf.short_t1_reglas, tf.short_t1_completa, tf.niveles_short);
+  html += cajaReglas('&uarr; Long T2', tf.long_t2_reglas, tf.long_t2_completa, null);
+  html += cajaReglas('&darr; Short T2', tf.short_t2_reglas, tf.short_t2_completa, null);
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+function seleccionarTFDetalle(tfName) {
+  document.querySelectorAll('#detalle-tf-pills .tf-pill').forEach(p => {
+    p.classList.toggle('activo', p.dataset.tf === tfName);
+  });
+  const tf = _detalleData.timeframes.find(t => t.timeframe === tfName);
+  if (tf) renderDetalleTF(tf);
+}
+
+function mostrarPanelDetalle() {
+  document.querySelectorAll('.panel').forEach(el => el.classList.remove('activo'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('activo'));
+  document.getElementById('panel-detalle').classList.add('activo');
+}
+
+function volverDeDetalle() {
+  cambiarTab('vivo');
 }
 
 async function abrirDetalleVivo(symbol) {
-  const overlay = document.getElementById('modal-overlay');
-  const titulo = document.getElementById('modal-titulo');
-  const contenido = document.getElementById('modal-contenido');
-
-  titulo.textContent = symbol;
-  contenido.innerHTML = '<p class="vacio">Cargando...</p>';
-  overlay.classList.add('activo');
+  document.getElementById('detalle-titulo').textContent = symbol;
+  document.getElementById('detalle-contenido').innerHTML = '<p class="vacio">Cargando...</p>';
+  document.getElementById('detalle-tf-pills').innerHTML = '';
+  mostrarPanelDetalle();
 
   try {
     const resp = await fetch(`/estado-vivo/detalle?symbol=${encodeURIComponent(symbol)}`);
     const data = await resp.json();
 
     if (!resp.ok) {
-      contenido.innerHTML = '<p class="vacio error">' + (data.detail || 'Error') + '</p>';
+      document.getElementById('detalle-contenido').innerHTML = '<p class="vacio error">' + (data.detail || 'Error') + '</p>';
       return;
     }
 
-    let html = '';
-    for (const tf of data.timeframes) {
-      html += `<div class="detalle-tf">
-                 <div class="detalle-tf-header">
-                   <span class="tf-nombre-grande">${tf.timeframe}</span>
-                   <span class="detalle-precio">precio ${tf.precio} · hace ${formatearTiempo(tf.actualizado_hace_segundos)}</span>
-                 </div>`;
-      html += bloqueReglasDetalle('↑ Long Type 1', 'long', tf.long_t1_reglas, tf.long_t1_completa);
-      html += bloqueNiveles(tf.niveles_long);
-      html += bloqueReglasDetalle('↓ Short Type 1', 'short', tf.short_t1_reglas, tf.short_t1_completa);
-      html += bloqueNiveles(tf.niveles_short);
-      if (tf.long_t2_reglas) {
-        html += bloqueReglasDetalle('↑ Long Type 2', 'long', tf.long_t2_reglas, tf.long_t2_completa);
-      }
-      if (tf.short_t2_reglas) {
-        html += bloqueReglasDetalle('↓ Short Type 2', 'short', tf.short_t2_reglas, tf.short_t2_completa);
-      }
-      html += '</div>';
-    }
-    contenido.innerHTML = html;
+    _detalleData = data;
+    document.getElementById('detalle-tf-pills').innerHTML = data.timeframes.map((tf, i) =>
+      `<span class="tf-pill ${i === 0 ? 'activo' : ''}" data-tf="${tf.timeframe}" onclick="seleccionarTFDetalle('${tf.timeframe}')">${tf.timeframe}</span>`
+    ).join('');
+    renderDetalleTF(data.timeframes[0]);
   } catch (err) {
-    contenido.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
+    document.getElementById('detalle-contenido').innerHTML = '<p class="vacio error">Error: ' + err + '</p>';
   }
-}
-
-function cerrarModalDetalle(event) {
-  if (event && event.target !== event.currentTarget) return;
-  document.getElementById('modal-overlay').classList.remove('activo');
 }
 
 function bloqueTimeframe(p) {
@@ -1222,6 +1303,7 @@ def estado_vivo_detalle(symbol: str = Query(...)):
             "short_t2_reglas": datos["short_t2_reglas"],
             "niveles_long": datos["niveles_long"],
             "niveles_short": datos["niveles_short"],
+            "indicadores": datos["indicadores"],
         })
 
     if not resultado:
