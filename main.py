@@ -517,11 +517,8 @@ def panel_unificado():
     <div class="nav-item" data-tab="datos" onclick="cambiarTab('datos')">
       <span class="num">02</span> Historico
     </div>
-    <div class="nav-item" data-tab="backtest" onclick="cambiarTab('backtest')">
-      <span class="num">03</span> Backtest
-    </div>
     <div class="nav-item" data-tab="vivo" onclick="cambiarTab('vivo')">
-      <span class="num">04</span> En vivo <span class="pulse"></span>
+      <span class="num">03</span> En vivo <span class="pulse"></span>
     </div>
   </div>
 
@@ -578,8 +575,8 @@ def panel_unificado():
     <!-- PANEL 2: DATOS DISPONIBLES -->
     <div class="panel" id="panel-datos">
       <div class="panel-header">
-        <h2>Historico disponible</h2>
-        <p>Pares y timeframes ya cargados en la base de datos.</p>
+        <h2>Historico y backtest puntual</h2>
+        <p>Pares y timeframes ya cargados en la base de datos. Toca una fila para correr su backtest abajo.</p>
       </div>
       <div class="card">
         <div class="section-title-row">
@@ -588,15 +585,8 @@ def panel_unificado():
         </div>
         <div id="tabla-disponibles"><p class="vacio">Cargando...</p></div>
       </div>
-    </div>
-
-    <!-- PANEL 3: BACKTEST -->
-    <div class="panel" id="panel-backtest">
-      <div class="panel-header">
-        <h2>Backtest</h2>
-        <p>Corre el motor de reglas UPS sobre el historico cargado. 100% en Railway.</p>
-      </div>
       <div class="card">
+        <h3>Correr backtest puntual</h3>
         <label for="bt-symbol">Simbolo</label>
         <input type="text" id="bt-symbol" placeholder="XAGUSD">
         <label for="bt-timeframe">Timeframe</label>
@@ -607,7 +597,7 @@ def panel_unificado():
       </div>
     </div>
 
-    <!-- PANEL 4: EN VIVO -->
+    <!-- PANEL 3: EN VIVO -->
     <div class="panel" id="panel-vivo">
       <div class="panel-header">
         <div class="section-title-row">
@@ -814,7 +804,7 @@ async function cargarDisponibles() {
 function usarEnBacktest(symbol, timeframe) {
   document.getElementById('bt-symbol').value = symbol;
   document.getElementById('bt-timeframe').value = timeframe;
-  cambiarTab('backtest');
+  document.getElementById('btn-backtest').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ---------- BACKTEST ----------
