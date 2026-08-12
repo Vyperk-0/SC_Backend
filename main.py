@@ -440,7 +440,7 @@ def panel_unificado():
   .leyenda b { color: var(--text); }
   .badge-short { color: var(--short); font-weight: 700; }
 
-  #tabla-vivo {
+  #tabla-vivo, #tabla-resumen {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.8rem;
   }
   .grupo-activo {
@@ -488,7 +488,7 @@ def panel_unificado():
     .nav-item { flex-shrink: 0; }
     .main { padding: 1.3rem 1rem; max-width: 100%; }
     .stats-grid { grid-template-columns: 1fr; }
-    #tabla-vivo { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem; }
+    #tabla-vivo, #tabla-resumen { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem; }
   }
 </style>
 </head>
@@ -501,7 +501,7 @@ def panel_unificado():
     <div class="brand-sub">Sistema de senales</div>
 
     <div class="nav-item activo" data-tab="cargar" onclick="cambiarTab('cargar')">
-      <span class="num">01</span> Cargar CSV
+      <span class="num">01</span> Resultados
     </div>
     <div class="nav-item" data-tab="datos" onclick="cambiarTab('datos')">
       <span class="num">02</span> Historico
@@ -516,12 +516,28 @@ def panel_unificado():
 
   <div class="main">
 
-    <!-- PANEL 1: CARGAR -->
+    <!-- PANEL 1: RESULTADOS DEL BACKTEST (agrupado por activo, estilo En Vivo) -->
     <div class="panel activo" id="panel-cargar">
       <div class="panel-header">
-        <h2>Cargar historico</h2>
-        <p>Sube el CSV exportado desde MT4 (UPS_Historico_Export.mq4). Se guarda en Postgres, en Railway.</p>
+        <div class="section-title-row">
+          <div>
+            <h2 style="margin:0 0 0.3rem">Resultados del backtest</h2>
+            <p style="margin:0">Rendimiento historico de cada activo/timeframe ya cargado en Postgres.</p>
+          </div>
+          <button class="ghost" id="btn-cargar-resumen" onclick="cargarResumenBacktest()">Cargar resultados</button>
+        </div>
+        <div class="leyenda">
+          <span><span class="badge-ok">&uarr;</span> Long</span>
+          <span><span class="badge-short">&darr;</span> Short</span>
+          <span><b>%</b> = % de acierto</span>
+          <span><b>Neto</b> = pips acumulados (positivo = ganancia)</span>
+        </div>
       </div>
+      <div id="tabla-resumen"><p class="vacio">Toca "Cargar resultados" para calcular (puede tardar segun cuantos activos tengas cargados).</p></div>
+    </div>
+
+    <!-- PANEL 2b (oculto, ya no se usa como pestana - subida disponible via API si hace falta) -->
+    <div class="panel" id="panel-subir-legacy" style="display:none">
       <div class="card">
         <label for="up-symbol">Simbolo</label>
         <input type="text" id="up-symbol" placeholder="XAGUSD">
@@ -772,6 +788,71 @@ function flecha(direccion, valor, completa) {
   return `<span class="${clase} ${completa ? 'completa' : ''}">${icono} ${valor}</span>`;
 }
 
+// ---------- RESULTADOS DEL BACKTEST (agrupado por activo) ----------
+function bloqueResultado(r) {
+  const colorLong = r.long_neto > 0 ? 'flecha-long completa' : 'flecha-long';
+  const colorShort = r.short_neto > 0 ? 'flecha-short completa' : 'flecha-short';
+  return `<div class="tf-block">
+            <div class="tf-header">
+              <span class="tf-nombre">${r.timeframe}</span>
+              <span>${r.velas} velas</span>
+            </div>
+            <div class="tipo-row">
+              <span class="tipo-tag">L</span>
+              <span class="${colorLong}">${r.long_pct}% (${r.long_senales})</span>
+              <span style="color:var(--text-muted)">neto ${r.long_neto}</span>
+            </div>
+            <div class="tipo-row">
+              <span class="tipo-tag">S</span>
+              <span class="${colorShort}">${r.short_pct}% (${r.short_senales})</span>
+              <span style="color:var(--text-muted)">neto ${r.short_neto}</span>
+            </div>
+          </div>`;
+}
+
+async function cargarResumenBacktest() {
+  const cont = document.getElementById('tabla-resumen');
+  const btn = document.getElementById('btn-cargar-resumen');
+  btn.disabled = true;
+  btn.textContent = "Calculando...";
+  cont.innerHTML = '<p class="vacio">Corriendo backtest sobre todo el historico cargado, puede tardar...</p>';
+
+  try {
+    const resp = await fetch('/backtest/resumen');
+    const data = await resp.json();
+    const resultados = data.resultados || [];
+
+    if (resultados.length === 0) {
+      cont.innerHTML = '<p class="vacio">Aun no hay historico cargado para calcular resultados.</p>';
+      btn.disabled = false;
+      btn.textContent = "Cargar resultados";
+      return;
+    }
+
+    const grupos = {};
+    for (const r of resultados) {
+      if (!grupos[r.symbol]) grupos[r.symbol] = [];
+      grupos[r.symbol].push(r);
+    }
+
+    let html = '';
+    for (const symbol of Object.keys(grupos).sort()) {
+      html += `<div class="grupo-activo">
+                 <div class="grupo-activo-titulo">${symbol}</div>`;
+      for (const r of grupos[symbol]) {
+        html += bloqueResultado(r);
+      }
+      html += '</div>';
+    }
+    cont.innerHTML = html;
+  } catch (err) {
+    cont.innerHTML = '<p class="vacio error">Error cargando: ' + err + '</p>';
+  }
+
+  btn.disabled = false;
+  btn.textContent = "Cargar resultados";
+}
+
 function bloqueTimeframe(p) {
   const antiguo = p.actualizado_hace_segundos > 180;
   let html = `<div class="tf-block" style="${antiguo ? 'opacity:0.4' : ''}">
@@ -983,6 +1064,48 @@ def historico_disponibles():
         return {"disponibles": db.listar_pares_disponibles()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/backtest/resumen")
+def backtest_resumen(max_velas_espera: int = Query(50)):
+    """
+    Corre el backtest sobre TODAS las combinaciones simbolo/timeframe
+    que ya tengan historico cargado, y devuelve un resumen compacto
+    de cada una (agrupable por simbolo en el panel). Puede tardar
+    segun cuantas combinaciones haya cargadas.
+    """
+    try:
+        disponibles = db.listar_pares_disponibles()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    resultado = []
+    for item in disponibles:
+        symbol = item["symbol"]
+        timeframe = item["timeframe"]
+        try:
+            filas = db.obtener_historico(symbol, timeframe)
+            if not filas:
+                continue
+            r = correr_backtest_sobre_filas(filas, max_velas_espera=max_velas_espera)
+            stats_long = calcular_estadisticas(r["trades_long"])
+            stats_short = calcular_estadisticas(r["trades_short"])
+            resultado.append({
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "velas": item["velas"],
+                "long_pct": stats_long["pct_acierto"],
+                "long_neto": stats_long["resultado_neto_pips"],
+                "long_senales": stats_long["total_senales"],
+                "short_pct": stats_short["pct_acierto"],
+                "short_neto": stats_short["resultado_neto_pips"],
+                "short_senales": stats_short["total_senales"],
+            })
+        except Exception as e:
+            logger.warning(f"Error en backtest resumen para {symbol} {timeframe}: {e}")
+            continue
+
+    return {"resultados": resultado}
 
 
 @app.get("/backtest")
