@@ -42,7 +42,7 @@ CAPTURAS_DIR.mkdir(parents=True, exist_ok=True)
 EXTENSION = "gif"  # ChartScreenShot en MT4 clasico siempre genera GIF
 
 # Umbral: si ya hay una imagen mas nueva que esto, no se vuelve a pedir
-FRESCURA_SEGUNDOS = 55
+FRESCURA_SEGUNDOS = 4
 
 # Si un pedido queda sin atender mas de esto (EA offline, etc.) se descarta
 EXPIRACION_PEDIDO_SEGUNDOS = 180
