@@ -1,92 +1,74 @@
-# UPS Monitor Agent
+# UPS Control (React + Vite + Tailwind + Flowbite)
 
-Backend del agente de trading para el sistema UPS (Ultimate Profit Solution).
-Recibe datos de indicadores desde un EA en MT4 vía webhook, evalua las
-reglas exactas del manual UPS de forma determinista (sin IA), guarda
-historico en Postgres, y corre backtesting - todo en Railway, sin
-depender de la PC del usuario.
+Reescritura del panel de control del sistema UPS en React, usando
+Vite como bundler, Tailwind CSS v4 para estilos, y Flowbite React
+para componentes de UI (botones, tablas, inputs).
 
 ## Estructura
 
 ```
-UPS_Monitor_Agent/
-├── main.py                # Servidor FastAPI: webhook, historico, backtest, pagina de upload
-├── ups_rules_engine.py    # Motor de reglas UPS (Type 1/2, Long/Short)
-├── backtesting.py         # Logica de backtesting (reutilizable: CSV local o Postgres)
-├── db.py                  # Conexion y operaciones con Postgres (historico)
-├── requirements.txt       # Dependencias Python
-└── Procfile                # Comando de arranque para Railway
+src/
+├── api/
+│   ├── client.js        # Cliente centralizado que habla con el backend (Railway)
+│   ├── categorias.js     # Mapa de simbolo -> categoria (Shares US, Forex, Oro, Silver, Crypto)
+│   └── utils.js          # Funciones compartidas (formateo de tiempo, colores de indicador)
+├── components/
+│   ├── Layout.jsx         # Sidebar de navegacion + contenedor principal
+│   └── FiltroActivos.jsx  # Buscador + filtro por categoria (reutilizado en 2 paginas)
+├── pages/
+│   ├── Resultados.jsx     # Resumen de backtest de todos los activos
+│   ├── Historico.jsx      # Lista de historico cargado + backtest puntual + subida CSV
+│   ├── EnVivo.jsx         # Estado en tiempo real, agrupado por activo
+│   └── DetalleActivo.jsx  # Pagina dedicada: indicadores + reglas de un activo (ruta /activo/:symbol)
+├── App.jsx                # Rutas (React Router)
+└── main.jsx                # Punto de entrada
 ```
 
-## Correr localmente
+## Correr en desarrollo
 
 ```bash
-pip install -r requirements.txt
-uvicorn main:app --reload
+npm install
+cp .env.example .env    # ajusta VITE_API_URL si hace falta
+npm run dev
 ```
 
-Servidor disponible en `http://127.0.0.1:8000`.
-Documentación interactiva automática en `http://127.0.0.1:8000/docs`.
+Abre `http://localhost:5173`.
 
-## Deploy en Railway
-
-1. Sube esta carpeta a un repositorio de GitHub.
-2. En Railway: **New Project** → **Deploy from GitHub repo** → selecciona el repo.
-3. Agrega Postgres: dentro del proyecto → **New** → **Database** → **Add PostgreSQL**
-   (Railway conecta `DATABASE_URL` automaticamente, no hace falta configurar nada mas).
-4. Railway detecta `requirements.txt` y `Procfile` automaticamente y despliega.
-5. Genera un dominio publico en **Settings → Networking → Generate Domain** si no se asigna solo.
-
-## Subir historico (sin usar la PC despues de este paso)
-
-**Opcion A - pagina web (recomendado, sin terminal):**
-Abre https://upsmonitoralert-production.up.railway.app/upload en cualquier
-navegador, arrastra el CSV exportado (ver `UPS_Historico_Export.mq4`),
-completa simbolo/timeframe, y sube.
-
-**Opcion B - curl:**
-```bash
-curl -X POST "https://upsmonitoralert-production.up.railway.app/historico/upload?symbol=XAGUSD&timeframe=W1" \
-     -F "archivo=@UPS_Historico_XAGUSD_W1.csv"
-```
-
-## Backtesting (corre en Railway, no en la PC)
+## Build de produccion
 
 ```bash
-curl "https://upsmonitoralert-production.up.railway.app/backtest?symbol=XAGUSD&timeframe=W1"
+npm run build
 ```
 
-Devuelve estadisticas de Long y Short Type 1: numero de senales,
-% de acierto, ganancia/perdida promedio, resultado neto en pips.
+Genera la carpeta `dist/` con los archivos estaticos listos para
+hostear en cualquier lado (Vercel, Netlify, o el mismo Railway via
+`StaticFiles`).
 
-Ver que pares/timeframes ya tienen historico cargado:
-```bash
-curl "https://upsmonitoralert-production.up.railway.app/historico/disponibles"
-```
+## Variable de entorno
 
-## Estado del proyecto
+`VITE_API_URL` — URL base de tu backend en Railway (sin `/` al final).
+Definida en `.env` (no se sube a git, ver `.env.example`).
 
-- [x] Motor de reglas UPS (6 indicadores, Type 1/2, Long/Short)
-- [x] Servidor FastAPI con webhook funcional
-- [x] EA en MT4 mandando datos reales cada minuto
-- [x] Historico + backtesting corriendo 100% en Railway (Postgres)
-- [ ] Backtesting en mas pares/timeframes, y Type 2
-- [ ] Calibrar umbral de volatilidad TRVI por simbolo con datos reales
-- [ ] RAG del manual PDF
-- [ ] Alertas por WhatsApp (CallMeBot)
-- [ ] Chat web conectado a Claude API
+## Deploy recomendado: Vercel
 
-## Nota importante
+1. Sube esta carpeta a un repo de GitHub (separado del repo del backend).
+2. En Vercel: **New Project** → importa el repo.
+3. Vercel detecta Vite automaticamente. Agrega la variable de entorno
+   `VITE_API_URL` en la configuracion del proyecto (Settings → Environment Variables).
+4. Deploy. Listo — el frontend queda en su propio dominio (ej. `ups-control.vercel.app`),
+   hablando con el backend en Railway via HTTP (CORS ya esta habilitado en el backend).
 
-Este backend NO usa IA para decidir senales - el motor de reglas es
-100% determinista, basado en el mapeo de buffers confirmado
-manualmente sobre los indicadores UPS reales en MT4. La IA (Claude)
-se conecta en una fase posterior, unicamente para el chat
-conversacional y las explicaciones - nunca para decidir si hay senal.
+## Importante: el backend (Railway) no cambia
 
-Todo el sistema (motor de reglas, historico, backtesting, y mas
-adelante el chat) corre en Railway 24/7 - la PC del usuario y el
-Virtual Hosting de MT4 son las unicas piezas fuera de Railway, y
-ninguna de las dos necesita estar prendida para consultar resultados
-o correr un backtest.
+Este frontend consume los mismos endpoints que ya existian en el
+panel HTML anterior (`/estado-vivo`, `/backtest`, `/historico/*`,
+etc.) - no hizo falta tocar el motor de reglas, el EA, ni la base de
+datos. Es una migracion solo de la capa visual.
 
+## Flowbite
+
+Se usan componentes de `flowbite-react` (Button, TextInput, Table)
+sobre Tailwind CSS v4. La paleta de colores personalizada (fondo
+oscuro, acento ambar) esta definida en `src/index.css` via `@theme`,
+y Tailwind la expone como clases utilitarias normales
+(`bg-surface`, `text-accent`, etc.) en todo el proyecto.
