@@ -155,3 +155,30 @@ async def subir_captura(symbol: str, timeframe: str, request: Request):
         _pendientes.pop(_clave(symbol, timeframe), None)
 
     return {"ok": True, "symbol": symbol, "timeframe": timeframe, "bytes": len(cuerpo)}
+
+
+@router.post("/captura/descartar")
+async def descartar_pendiente(symbol: str, timeframe: str):
+    """
+    El EA llama esto cuando un pedido de captura FALLO (chart no abrio,
+    plantilla no aplico, etc). Sin esto, un pedido que falla queda
+    trabado en el primer lugar de la cola para siempre (hasta que
+    expire solo, ~3 minutos), bloqueando a todos los que llegan
+    despues -- el EA solo procesa el primero de la lista en cada ciclo.
+    Sacandolo apenas falla, el siguiente pedido puede pasar en la
+    proxima revision (5s despues) en vez de esperar la expiracion.
+    Si el usuario sigue mirando ese mismo activo, el frontend lo va a
+    volver a pedir solo en el proximo ciclo de todos modos.
+    """
+    with _pendientes_lock:
+        _pendientes.pop(_clave(symbol, timeframe), None)
+    return {"ok": True}
+
+
+@router.post("/captura/vaciar-cola")
+async def vaciar_cola():
+    """Vacia toda la cola de pendientes a mano (uso manual/debug)."""
+    with _pendientes_lock:
+        cantidad = len(_pendientes)
+        _pendientes.clear()
+    return {"ok": True, "descartados": cantidad}
