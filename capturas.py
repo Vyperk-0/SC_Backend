@@ -123,9 +123,14 @@ async def listar_pendientes():
     Texto plano, una linea por pedido: SIMBOLO|TIMEFRAME
     (formato simple a proposito para que sea trivial de parsear en MQL4).
     Purga pedidos viejos que nadie atendio.
+
+    Ordenado del pedido MAS RECIENTE al mas viejo -- asi cuando alguien
+    abre un activo nuevo, sus 5 timeframes pasan a procesarse antes que
+    pedidos que quedaron esperando de otras pestañas/activos anteriores.
+    Un pedido viejo que nunca llega a su turno simplemente expira solo
+    a los 180s (probablemente el usuario ya se fue de esa pagina).
     """
     ahora = time.time()
-    lineas = []
     with _pendientes_lock:
         vencidos = [
             clave for clave, ts in _pendientes.items()
@@ -134,9 +139,9 @@ async def listar_pendientes():
         for clave in vencidos:
             del _pendientes[clave]
 
-        for clave in _pendientes:
-            symbol, timeframe = clave.rsplit("_", 1)
-            lineas.append(f"{symbol}|{timeframe}")
+        # Mas reciente primero (mayor timestamp = mas nuevo = mas prioridad)
+        ordenados = sorted(_pendientes.items(), key=lambda item: item[1], reverse=True)
+        lineas = [clave.rsplit("_", 1)[0] + "|" + clave.rsplit("_", 1)[1] for clave, _ in ordenados]
 
     return "\n".join(lineas)
 
