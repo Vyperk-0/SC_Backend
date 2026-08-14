@@ -1271,7 +1271,17 @@ def estado_vivo():
     """
     ahora = datetime.now(timezone.utc)
     resultado = []
-    for (symbol, timeframe), datos in sorted(ESTADO_VIVO.items()):
+
+    # Mismo criterio de orden que en /estado-vivo/detalle: por duracion
+    # real del timeframe (H1->H4->D1->W1->MN), no alfabetico.
+    orden_timeframes = {"H1": 0, "H4": 1, "D1": 2, "W1": 3, "MN": 4}
+
+    items_ordenados = sorted(
+        ESTADO_VIVO.items(),
+        key=lambda item: (item[0][0], orden_timeframes.get(item[0][1], 99)),
+    )
+
+    for (symbol, timeframe), datos in items_ordenados:
         segundos = (ahora - datos["actualizado"]).total_seconds()
         resultado.append({
             "symbol": datos["symbol"],
@@ -1300,9 +1310,18 @@ def estado_vivo_detalle(symbol: str = Query(...)):
     ahora = datetime.now(timezone.utc)
     resultado = []
 
-    for (s, timeframe), datos in sorted(ESTADO_VIVO.items()):
-        if s != symbol:
-            continue
+    # Orden por duracion real (H1 -> H4 -> D1 -> W1 -> MN), NO alfabetico.
+    # sorted() sobre el nombre del timeframe los deja como D1,H1,H4,MN,W1
+    # (orden de texto), que es justamente el desorden que se veia en el
+    # panel -- esta tabla fuerza el orden logico correcto.
+    orden_timeframes = {"H1": 0, "H4": 1, "D1": 2, "W1": 3, "MN": 4}
+
+    items_del_simbolo = [
+        (tf, datos) for (s, tf), datos in ESTADO_VIVO.items() if s == symbol
+    ]
+    items_del_simbolo.sort(key=lambda item: orden_timeframes.get(item[0], 99))
+
+    for timeframe, datos in items_del_simbolo:
         segundos = (ahora - datos["actualizado"]).total_seconds()
         resultado.append({
             "timeframe": datos["timeframe"],
