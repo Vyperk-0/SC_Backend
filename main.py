@@ -204,6 +204,14 @@ PARES_VIGILADOS: List[str] = []
 # real en la practica.
 ESTADO_VIVO: dict = {}
 
+# Si un simbolo/timeframe deja de recibir datos del EA por mas de esto,
+# se oculta solo de /estado-vivo y /estado-vivo/detalle (sin borrarse
+# de la memoria, solo se filtra al leer). Asi si sacas un activo del
+# input ParesAMonitorear del EA, desaparece solo del panel sin
+# necesidad de reiniciar el backend a mano. 5 minutos da margen para
+# tolerar algun reinicio momentaneo del EA sin que el activo parpadee.
+UMBRAL_DESACTUALIZADO_SEGUNDOS = 300
+
 
 def procesar_senal_para_alerta(evaluacion: ResultadoEvaluacion, niveles: dict):
     """
@@ -1283,6 +1291,8 @@ def estado_vivo():
 
     for (symbol, timeframe), datos in items_ordenados:
         segundos = (ahora - datos["actualizado"]).total_seconds()
+        if segundos > UMBRAL_DESACTUALIZADO_SEGUNDOS:
+            continue  # dejo de reportar hace rato -- se oculta solo
         resultado.append({
             "symbol": datos["symbol"],
             "timeframe": datos["timeframe"],
@@ -1323,6 +1333,8 @@ def estado_vivo_detalle(symbol: str = Query(...)):
 
     for timeframe, datos in items_del_simbolo:
         segundos = (ahora - datos["actualizado"]).total_seconds()
+        if segundos > UMBRAL_DESACTUALIZADO_SEGUNDOS:
+            continue  # dejo de reportar hace rato -- se oculta solo
         resultado.append({
             "timeframe": datos["timeframe"],
             "precio": datos["precio"],
