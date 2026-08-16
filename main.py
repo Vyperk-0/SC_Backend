@@ -204,13 +204,26 @@ PARES_VIGILADOS: List[str] = []
 # real en la practica.
 ESTADO_VIVO: dict = {}
 
-# Si un simbolo/timeframe deja de recibir datos del EA por mas de esto,
-# se oculta solo de /estado-vivo y /estado-vivo/detalle (sin borrarse
-# de la memoria, solo se filtra al leer). Asi si sacas un activo del
-# input ParesAMonitorear del EA, desaparece solo del panel sin
-# necesidad de reiniciar el backend a mano. 5 minutos da margen para
-# tolerar algun reinicio momentaneo del EA sin que el activo parpadee.
-UMBRAL_DESACTUALIZADO_SEGUNDOS = 300
+# Lista fija de simbolos que se muestran en el panel. Tiene que
+# coincidir con el input ParesAMonitorear del EA -- si agregas o
+# sacas un simbolo del EA, hay que actualizar esta lista tambien
+# (a mano, aca). No se basa en tiempo/actividad reciente: lo que no
+# esta en esta lista simplemente no se muestra nunca, y lo que SI
+# esta se muestra siempre (aunque el EA este momentaneamente caido),
+# asi no hay parpadeos raros por reinicios o cortes breves.
+SIMBOLOS_ACTIVOS = {
+    "ADOBE", "ALCOA", "ALIBABA", "AMAZON", "AMD", "AMEX", "APPLE", "BOA",
+    "BOEING", "BOOKING", "CHEVRON", "CISCO", "CITI", "COKE", "Coinbase",
+    "DEVON", "DISNEY", "EBAY", "EXXON", "FORD", "GE", "GOOGLE", "GS",
+    "HLT", "IBM", "ILMN", "INTEL", "JNJ", "JPMORGAN", "LAM", "MCARD",
+    "MCDON", "META", "MICROCHIP", "MICRON", "MODERNA", "MSFT", "NIKE",
+    "NVIDIA", "Netflix", "PAYPAL", "PEPSI", "PFIZER", "QCOM",
+    "SALESFORCE", "STARBUCKS", "TEVA", "Tesla", "UBER", "VISA",
+    "AUDUSD", "EURUSD", "USDJPY", "GBPUSD", "USDCHF", "USDCAD",
+    "EURGBP", "XAUEUR", "XAUUSD", "XAGEUR", "XAGUSD",
+    "#ADAUSDr", "#BNBUSDr", "#BTCUSDr", "#DOGEUSDr", "#ETHUSDr",
+    "#LTCUSDr", "#SOLUSDr", "#TRXUSDr", "#XRPUSDr",
+}
 
 
 def procesar_senal_para_alerta(evaluacion: ResultadoEvaluacion, niveles: dict):
@@ -1290,9 +1303,9 @@ def estado_vivo():
     )
 
     for (symbol, timeframe), datos in items_ordenados:
+        if symbol not in SIMBOLOS_ACTIVOS:
+            continue  # ya no esta en la lista vigilada -- no se muestra nunca
         segundos = (ahora - datos["actualizado"]).total_seconds()
-        if segundos > UMBRAL_DESACTUALIZADO_SEGUNDOS:
-            continue  # dejo de reportar hace rato -- se oculta solo
         resultado.append({
             "symbol": datos["symbol"],
             "timeframe": datos["timeframe"],
@@ -1333,8 +1346,6 @@ def estado_vivo_detalle(symbol: str = Query(...)):
 
     for timeframe, datos in items_del_simbolo:
         segundos = (ahora - datos["actualizado"]).total_seconds()
-        if segundos > UMBRAL_DESACTUALIZADO_SEGUNDOS:
-            continue  # dejo de reportar hace rato -- se oculta solo
         resultado.append({
             "timeframe": datos["timeframe"],
             "precio": datos["precio"],
