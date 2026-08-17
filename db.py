@@ -211,3 +211,105 @@ def listar_pares_disponibles() -> List[dict]:
         conn.close()
 
     return resultado
+
+
+# =====================================================================
+# HISTORIAL DIARIO DE SEÑALES (para el grafico semanal del Dashboard)
+# =====================================================================
+# Cada vez que una senal pasa de "no completa" a "completa" en el
+# webhook, se inserta UNA fila aca (no una fila por cada llamada del
+# EA mientras la senal se mantiene completa -- eso duplicaria el
+# conteo). El propio webhook en main.py es el que decide cuando llamar
+# a registrar_evento_senal(), comparando contra el estado anterior.
+
+def _crear_tabla_eventos(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS eventos_senales (
+            id SERIAL PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            direccion TEXT NOT NULL,
+            fecha DATE NOT NULL,
+            creado_en TIMESTAMP NOT NULL DEFAULT now()
+        );
+    """)
+
+
+def registrar_evento_senal(symbol: str, timeframe: str, tipo: str, direccion: str) -> None:
+    """Inserta un evento de 'senal recien completada'. Se llama SOLO en
+    la transicion de no-completa a completa, nunca en cada webhook."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tabla_eventos(cur)
+            cur.execute("""
+                INSERT INTO eventos_senales (symbol, timeframe, tipo, direccion, fecha)
+                VALUES (%s, %s, %s, %s, CURRENT_DATE);
+            """, (symbol, timeframe, tipo, direccion))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def obtener_historico_semana():
+    """Devuelve, para cada dia de la semana ACTUAL (lunes a domingo,
+    segun la fecha del servidor), cuantas senales long/short se
+    completaron y cuantos simbolos DISTINTOS (sin importar direccion)
+    tuvieron al menos una. Los dias sin eventos (incluidos los que
+    todavia no llegaron) quedan en cero -- el frontend decide como
+    dibujar eso."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tabla_eventos(cur)
+            cur.execute("""
+                SELECT fecha, direccion, COUNT(*)
+                FROM eventos_senales
+                WHERE fecha >= date_trunc('week', CURRENT_DATE)::date
+                  AND fecha < (date_trunc('week', CURRENT_DATE) + INTERVAL '7 days')::date
+                GROUP BY fecha, direccion;
+            """)
+            filas_direccion = cur.fetchall()
+
+            cur.execute("""
+                SELECT fecha, COUNT(DISTINCT symbol)
+                FROM eventos_senales
+                WHERE fecha >= date_trunc('week', CURRENT_DATE)::date
+                  AND fecha < (date_trunc('week', CURRENT_DATE) + INTERVAL '7 days')::date
+                GROUP BY fecha;
+            """)
+            filas_activos = cur.fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+
+    from datetime import date as _date, timedelta as _timedelta
+    hoy = _date.today()
+    lunes = hoy - _timedelta(days=hoy.weekday())
+
+    semana = []
+    for i in range(7):
+        dia = lunes + _timedelta(days=i)
+        semana.append({
+            "fecha": dia.strftime("%Y-%m-%d"),
+            "long": 0, "short": 0, "activos": 0,
+        })
+
+    indice_por_fecha = {d["fecha"]: d for d in semana}
+
+    for fecha, direccion, cantidad in filas_direccion:
+        clave = fecha.strftime("%Y-%m-%d")
+        if clave not in indice_por_fecha:
+            continue
+        if direccion == "long":
+            indice_por_fecha[clave]["long"] = cantidad
+        elif direccion == "short":
+            indice_por_fecha[clave]["short"] = cantidad
+
+    for fecha, simbolos_distintos in filas_activos:
+        clave = fecha.strftime("%Y-%m-%d")
+        if clave in indice_por_fecha:
+            indice_por_fecha[clave]["activos"] = simbolos_distintos
+
+    return semana

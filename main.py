@@ -259,6 +259,13 @@ def recibir_indicadores(payload: IndicadoresPayload):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Payload invalido: {e}")
 
+    # Guardamos el estado ANTERIOR (si existia) antes de tocar nada, para
+    # poder comparar despues y detectar transiciones de "no completa" a
+    # "completa" -- eso es lo unico que se registra en el historial diario,
+    # no cada llamada del EA mientras la senal se mantiene completa.
+    clave = (payload.symbol, payload.timeframe)
+    estado_previo = ESTADO_VIVO.get(clave)
+
     # Evaluacion Type 1 (siempre se puede calcular con un solo timeframe)
     eval_long_1 = evaluar_type1_long(lectura)
     eval_short_1 = evaluar_type1_short(lectura)
@@ -342,6 +349,33 @@ def recibir_indicadores(payload: IndicadoresPayload):
         },
         "actualizado": datetime.now(timezone.utc),
     }
+
+    # Si alguna senal paso de "no completa" a "completa" en esta vuelta,
+    # se registra UN evento en la base para el historial diario. Se
+    # compara contra estado_previo (capturado al principio, antes de
+    # tocar nada) para no contar de nuevo una senal que ya estaba
+    # completa en el webhook anterior.
+    def _estaba_completa_antes(campo):
+        return bool(estado_previo and estado_previo.get(campo))
+
+    eventos_nuevos = []
+    if eval_long_1.senal_completa and not _estaba_completa_antes("long_t1_completa"):
+        eventos_nuevos.append((payload.symbol, payload.timeframe, "T1", "long"))
+    if eval_short_1.senal_completa and not _estaba_completa_antes("short_t1_completa"):
+        eventos_nuevos.append((payload.symbol, payload.timeframe, "T1", "short"))
+    if payload.tf_superior:
+        if respuesta.long_type2 and respuesta.long_type2.senal_completa and not _estaba_completa_antes("long_t2_completa"):
+            eventos_nuevos.append((payload.symbol, payload.timeframe, "T2", "long"))
+        if respuesta.short_type2 and respuesta.short_type2.senal_completa and not _estaba_completa_antes("short_t2_completa"):
+            eventos_nuevos.append((payload.symbol, payload.timeframe, "T2", "short"))
+
+    for symbol_ev, tf_ev, tipo_ev, direccion_ev in eventos_nuevos:
+        try:
+            db.registrar_evento_senal(symbol_ev, tf_ev, tipo_ev, direccion_ev)
+        except Exception as e:
+            # Nunca romper el webhook por un problema al guardar el
+            # historial diario -- el EA depende de que esto responda 200.
+            logger.warning(f"No se pudo registrar evento de senal ({symbol_ev} {tf_ev} {tipo_ev} {direccion_ev}): {e}")
 
     return respuesta
 
@@ -1477,6 +1511,21 @@ def historico_disponibles():
     """Lista que pares/timeframes ya tienen historico cargado en Railway."""
     try:
         return {"disponibles": db.listar_pares_disponibles()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/historico-diario")
+def historico_diario():
+    """
+    Conteo real de senales completadas por dia, para la semana actual
+    (lunes a domingo). Usado por el grafico semanal del Dashboard --
+    antes esto eran barras decorativas sin datos, ahora es el conteo
+    real de eventos guardados por el webhook cada vez que una senal
+    pasa de "no completa" a "completa".
+    """
+    try:
+        return {"semana": db.obtener_historico_semana()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
