@@ -40,6 +40,7 @@ from ups_rules_engine import (
 from backtesting import correr_backtest_sobre_filas, calcular_estadisticas
 import db
 from capturas import router as capturas_router
+from usuarios import router as usuarios_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ups-backend")
@@ -62,6 +63,7 @@ app.add_middleware(
 )
 
 app.include_router(capturas_router)
+app.include_router(usuarios_router)
 
 
 @app.on_event("startup")
