@@ -100,6 +100,22 @@ def _verificar_password(password: str, password_hash: str) -> bool:
         return False
 
 
+def _obtener_ip_real(request: Request) -> Optional[str]:
+    """
+    Railway (como la mayoria de los servicios en la nube) pone el
+    backend detras de un proxy interno -- si usamos directo
+    request.client.host, guardamos la IP del proxy de Railway, no la
+    IP real de quien se logueo. Los proxies dejan la IP original en el
+    header 'X-Forwarded-For' (puede venir como una lista separada por
+    comas si hay varios proxies en cadena; el primero es el cliente
+    original).
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
 # =====================================================================
 # JWT
 # =====================================================================
@@ -185,7 +201,7 @@ class LoginBody(BaseModel):
 @router.post("/auth/login")
 def login(body: LoginBody, request: Request):
     identificador = body.identificador.strip().lower()
-    ip_cliente = request.client.host if request.client else None
+    ip_cliente = _obtener_ip_real(request)
 
     conn = db.get_connection()
     try:
