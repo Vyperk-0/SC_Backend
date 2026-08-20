@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 import requests
+from psycopg2.extras import execute_values
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
@@ -107,6 +108,25 @@ def _crear_tablas(cur):
         );
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_historial_user ON alertas_historial(user_id, enviado_en DESC);")
+
+    # Estado anterior de cada (alerta, simbolo, timeframe, direccion):
+    # si la ultima vez que se reviso esta combinacion estaba cumpliendo
+    # o no. Asi solo se dispara UNA vez por transicion "paso a cumplir"
+    # -- no en cada webhook mientras se mantiene cumpliendo. Persistido
+    # en Postgres (a diferencia de ESTADO_VIVO en main.py) para que un
+    # redeploy de Railway no dispare alertas "repetidas" para senales
+    # que ya estaban activas antes del redeploy.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS alertas_estado_anterior (
+            alerta_id INTEGER NOT NULL REFERENCES alertas_config(id) ON DELETE CASCADE,
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            direccion TEXT NOT NULL,
+            cumplia BOOLEAN NOT NULL,
+            actualizado_en TIMESTAMP NOT NULL DEFAULT now(),
+            PRIMARY KEY (alerta_id, symbol, timeframe, direccion)
+        );
+    """)
 
 
 PLANTILLA_DEFAULT = (
@@ -425,12 +445,8 @@ def historial_alertas(pagina: int = Query(1, ge=1), usuario: dict = Depends(usua
 # MOTOR DE DISPARO -- llamado desde main.py por cada evaluacion
 # =====================================================================
 
-# Recuerda, por cada (alerta_id, symbol, timeframe, direccion), si la
-# ultima vez que se reviso esta combinacion estaba cumpliendo o no.
-# Asi solo se dispara UNA vez por transicion "paso a cumplir" -- no en
-# cada webhook (cada 60s) mientras se mantiene cumpliendo. Vive en
-# memoria (se reinicia si Railway redeploya, igual que ESTADO_VIVO).
-_ULTIMO_ESTADO_ALERTA: dict = {}
+# El estado anterior (que reemplazaba a este dict) ahora se guarda
+# en la tabla alertas_estado_anterior -- ver evaluar_y_disparar_alertas.
 
 
 def _simbolo_coincide(symbol: str, simbolos_regla: List[str]) -> bool:
@@ -504,9 +520,30 @@ def evaluar_y_disparar_alertas(evaluacion, niveles: dict):
                 """
             )
             reglas_activas = cur.fetchall()
+
+            # Estado anterior persistido: una sola consulta para TODAS
+            # las reglas activas, filtrado a esta combinacion puntual
+            # (symbol, timeframe, direccion) -- evita N consultas
+            # individuales dentro del loop de abajo.
+            ids_reglas = [fila[0] for fila in reglas_activas]
+            estado_anterior = {}
+            if ids_reglas:
+                cur.execute(
+                    """
+                    SELECT alerta_id, cumplia FROM alertas_estado_anterior
+                    WHERE symbol = %s AND timeframe = %s AND direccion = %s
+                          AND alerta_id = ANY(%s);
+                    """,
+                    (symbol, timeframe, direccion, ids_reglas),
+                )
+                estado_anterior = dict(cur.fetchall())
         conn.commit()
     finally:
         conn.close()
+
+    # Se acumulan los cambios de estado para escribirlos todos juntos
+    # al final, en un solo UPSERT por lote (en vez de uno por regla).
+    cambios_estado = []
 
     for fila in reglas_activas:
         (alerta_id, user_id, nombre, simbolos_regla, timeframes_regla, direcciones_regla,
@@ -532,9 +569,9 @@ def evaluar_y_disparar_alertas(evaluacion, niveles: dict):
         cumple_t2 = (regla7_cumple if requiere_t2 else True)
         cumple_todo = cumple_indicadores and cumple_t2
 
-        clave_estado = (alerta_id, symbol, timeframe, direccion)
-        estaba_cumpliendo = _ULTIMO_ESTADO_ALERTA.get(clave_estado, False)
-        _ULTIMO_ESTADO_ALERTA[clave_estado] = cumple_todo
+        estaba_cumpliendo = estado_anterior.get(alerta_id, False)
+        if cumple_todo != estaba_cumpliendo:
+            cambios_estado.append((alerta_id, symbol, timeframe, direccion, cumple_todo))
 
         if not cumple_todo or estaba_cumpliendo:
             # O no cumple ahora, o ya cumplia la vuelta anterior (no
@@ -569,3 +606,23 @@ def evaluar_y_disparar_alertas(evaluacion, niveles: dict):
             conn2.commit()
         finally:
             conn2.close()
+
+    # Guardar todos los cambios de estado detectados en este ciclo,
+    # de una sola vez.
+    if cambios_estado:
+        conn3 = db.get_connection()
+        try:
+            with conn3.cursor() as cur3:
+                execute_values(
+                    cur3,
+                    """
+                    INSERT INTO alertas_estado_anterior (alerta_id, symbol, timeframe, direccion, cumplia, actualizado_en)
+                    VALUES %s
+                    ON CONFLICT (alerta_id, symbol, timeframe, direccion) DO UPDATE
+                    SET cumplia = EXCLUDED.cumplia, actualizado_en = now();
+                    """,
+                    [(aid, s, tf, d, c, datetime.now(timezone.utc)) for (aid, s, tf, d, c) in cambios_estado],
+                )
+            conn3.commit()
+        finally:
+            conn3.close()
