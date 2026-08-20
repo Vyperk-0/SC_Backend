@@ -19,6 +19,8 @@ from typing import Optional, List
 
 import requests
 from psycopg2.extras import execute_values
+
+from backtesting import correr_backtest_sobre_filas, calcular_estadisticas
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
@@ -130,12 +132,35 @@ def _crear_tablas(cur):
 
 
 PLANTILLA_DEFAULT = (
-    "🔔 {{simbolo}} · {{direccion}} · {{timeframe}}\n"
-    "Reglas 1-6: {{reglas}}/6 confirmadas\n"
-    "{{t2}}"
+    "{{icono}} {{direccion_mayus}} — {{simbolo}} {{timeframe}}\n"
+    "Entry: {{entry}} | SL: {{sl}} | TP: {{tp}}\n"
+    "📊 {{acierto}}% acierto histórico ({{senales}} señales)\n"
+    "{{indicadores}}"
 )
 
 DEFAULT_TIMEOUT_HTTP = 10
+
+
+def _obtener_stats_historicas(symbol: str, timeframe: str, direccion: str) -> tuple:
+    """
+    Corre el backtest para este symbol/timeframe (reutilizando el mismo
+    motor que /backtest/resumen en main.py) y devuelve (pct_acierto,
+    total_senales) para la direccion pedida. Si no hay historico
+    cargado para esa combinacion, devuelve (None, None) -- el mensaje
+    simplemente omite esos numeros en ese caso.
+    """
+    try:
+        filas = db.obtener_historico(symbol, timeframe)
+        if not filas:
+            return None, None
+        r = correr_backtest_sobre_filas(filas)
+        trades = r["trades_long"] if direccion == "long" else r["trades_short"]
+        stats = calcular_estadisticas(trades)
+        return stats["pct_acierto"], stats["total_senales"]
+    except Exception:
+        # Si el backtest falla por lo que sea, no vale la pena que eso
+        # bloquee el envio de la alerta -- se manda igual, sin esos datos.
+        return None, None
 
 
 # =====================================================================
@@ -468,15 +493,68 @@ def _indicadores_requeridos(indicadores_regla: List[str]) -> List[int]:
     return [INDICADOR_A_NUMERO_REGLA[i] for i in indicadores_regla if i in INDICADOR_A_NUMERO_REGLA]
 
 
-def _armar_mensaje(plantilla: str, symbol: str, direccion_texto: str, timeframe: str,
-                    reglas_confirmadas: int, t2_confirmado: bool) -> str:
+def _armar_bloque_indicadores(reglas_1_a_6: dict, incluir_t2: bool = False, t2_confirmado: bool = False) -> str:
+    """
+    Arma un bloque compacto con el estado de cada indicador (check o
+    cruz). Sin T2: 6 items en 2 filas de 3 (CS/TT/TRVI + TRWave/TSD/BB
+    Cloud). Con T2 (solo cuando la alerta puntual lo exige, ya que solo
+    ahi se evaluo la regla 7): 7 items en 4+3, con T2 al final de la
+    segunda fila -- asi la plantilla "cambia sola" segun si la alerta
+    es T1 o T2, sin necesitar dos plantillas default distintas.
+    """
+    nombres_compactos = {
+        1: "CS", 2: "TT", 3: "TRVI", 4: "TRWave", 5: "TSD", 6: "BB Cloud",
+    }
+    items = []
+    for n in [1, 2, 3, 4, 5, 6]:
+        marca = "✅" if reglas_1_a_6.get(n, False) else "❌"
+        items.append(f"{marca}{nombres_compactos[n]}")
+
+    if incluir_t2:
+        marca_t2 = "✅" if t2_confirmado else "❌"
+        items.append(f"{marca_t2}T2")
+        fila1 = " |".join(items[:4])
+        fila2 = " |".join(items[4:])
+    else:
+        fila1 = " |".join(items[:3])
+        fila2 = " |".join(items[3:])
+
+    return f"{fila1}\n{fila2}"
+
+
+def _armar_mensaje(plantilla: str, symbol: str, direccion: str, timeframe: str,
+                    reglas_confirmadas: int, t2_confirmado: bool, niveles: Optional[dict],
+                    pct_acierto: Optional[float], total_senales: Optional[int],
+                    reglas_1_a_6: dict) -> str:
+    direccion_texto = "Long" if direccion == "long" else "Short"
+    icono = "🟢" if direccion == "long" else "🔴"
+
+    entry = sl = tp = "-"
+    if niveles and not niveles.get("error"):
+        entry = f"{niveles['entry']:.5f}"
+        sl = f"{niveles['sl']:.5f}"
+        tp = f"{niveles['tp']:.5f}"
+
+    acierto_texto = f"{pct_acierto}" if pct_acierto is not None else "s/d"
+    senales_texto = f"{total_senales}" if total_senales is not None else "0"
+
     reemplazos = {
         "{{simbolo}}": symbol,
         "{{direccion}}": direccion_texto,
+        "{{direccion_mayus}}": direccion_texto.upper(),
+        "{{icono}}": icono,
         "{{timeframe}}": timeframe,
         "{{reglas}}": str(reglas_confirmadas),
-        "{{t2}}": "✅ TF superior tambien confirma (T2)" if t2_confirmado else "",
+        "{{reglas_ratio}}": f"{reglas_confirmadas}/6",
+        "{{t2}}": "✅ TF superior tambien confirma (T2)\n" if t2_confirmado else "",
         "{{hora}}": datetime.now().strftime("%H:%M"),
+        "{{entry}}": entry,
+        "{{sl}}": sl,
+        "{{tp}}": tp,
+        "{{acierto}}": acierto_texto,
+        "{{senales}}": senales_texto,
+        "{{indicadores}}": _armar_bloque_indicadores(reglas_1_a_6, incluir_t2=t2_confirmado, t2_confirmado=t2_confirmado),
+        "{{categoria}}": CATEGORIAS.get(symbol, "Otros"),
     }
     texto = plantilla or PLANTILLA_DEFAULT
     for variable, valor in reemplazos.items():
@@ -544,6 +622,10 @@ def evaluar_y_disparar_alertas(evaluacion, niveles: dict):
     # Se acumulan los cambios de estado para escribirlos todos juntos
     # al final, en un solo UPSERT por lote (en vez de uno por regla).
     cambios_estado = []
+    # Cache dentro de esta sola ejecucion -- si varias reglas activas
+    # coinciden con la misma combinacion symbol/timeframe/direccion, el
+    # backtest se corre una sola vez, no una por regla.
+    _cache_stats = {}
 
     for fila in reglas_activas:
         (alerta_id, user_id, nombre, simbolos_regla, timeframes_regla, direcciones_regla,
@@ -580,7 +662,14 @@ def evaluar_y_disparar_alertas(evaluacion, niveles: dict):
 
         reglas_confirmadas = sum(1 for n in [1, 2, 3, 4, 5, 6] if reglas_1_a_6.get(n, False))
         direccion_texto = "Long" if direccion == "long" else "Short"
-        mensaje = _armar_mensaje(plantilla, symbol, direccion_texto, timeframe, reglas_confirmadas, cumple_t2 and requiere_t2)
+        clave_stats = (symbol, timeframe, direccion)
+        if clave_stats not in _cache_stats:
+            _cache_stats[clave_stats] = _obtener_stats_historicas(symbol, timeframe, direccion)
+        pct_acierto, total_senales = _cache_stats[clave_stats]
+
+        mensaje = _armar_mensaje(plantilla, symbol, direccion, timeframe, reglas_confirmadas,
+                                  cumple_t2 and requiere_t2, niveles, pct_acierto, total_senales,
+                                  reglas_1_a_6)
 
         estado = "fallo"
         if numero_whatsapp and apikey_whatsapp:
