@@ -22,6 +22,9 @@ tenias):
 
 import os
 import re
+import logging
+import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -32,12 +35,62 @@ from pydantic import BaseModel
 
 import db
 
+logger = logging.getLogger("ups-usuarios")
+
 router = APIRouter()
 
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "cambiar-esta-clave-en-produccion-insegura")
+if SECRET_KEY == "cambiar-esta-clave-en-produccion-insegura":
+    # Aviso critico y bien visible en los Logs de Railway: si esto
+    # aparece, cualquiera que vea el codigo fuente puede forjar tokens
+    # validos para CUALQUIER usuario (incluido admin), sin contrasena.
+    # No se bloquea el arranque del servidor a proposito -- un error
+    # fatal aca tumbaria todo el backend por una variable de entorno
+    # mal propagada en un redeploy puntual, lo cual seria peor que
+    # simplemente avisar fuerte.
+    logger.critical(
+        "!!! JWT_SECRET_KEY NO CONFIGURADA !!! El backend esta usando la "
+        "clave por defecto (insegura, visible en el codigo fuente). "
+        "Configura la variable de entorno JWT_SECRET_KEY en Railway con "
+        "un valor aleatorio (ej. generado con 'openssl rand -hex 32') "
+        "lo antes posible."
+    )
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET")
 ALGORITMO = "HS256"
 DIAS_EXPIRACION = 30  # "Recordarme" queda tildado por defecto en el login, asi que el token dura bastante
+
+# =====================================================================
+# PROTECCION CONTRA FUERZA BRUTA (por IP, en memoria)
+# =====================================================================
+# Se cuenta por IP (no por email/username) para no filtrar si una
+# cuenta existe o no a traves de mensajes de error distintos, y para
+# no poder bloquear la cuenta de otra persona mandando intentos con su
+# email desde varias IPs. Vive en memoria -- se reinicia con cada
+# redeploy de Railway, mismo patron que ESTADO_VIVO en main.py; para
+# el volumen de este proyecto (uso personal/pocos usuarios) es
+# suficiente, no hace falta persistirlo en Postgres.
+_intentos_fallidos: dict = defaultdict(list)
+MAX_INTENTOS_LOGIN = 5
+VENTANA_INTENTOS_SEGUNDOS = 15 * 60  # 15 minutos
+
+
+def _ip_bloqueada(ip: Optional[str]) -> bool:
+    if not ip:
+        return False
+    ahora = time.time()
+    intentos = _intentos_fallidos[ip]
+    intentos[:] = [t for t in intentos if ahora - t < VENTANA_INTENTOS_SEGUNDOS]
+    return len(intentos) >= MAX_INTENTOS_LOGIN
+
+
+def _registrar_intento_fallido(ip: Optional[str]):
+    if ip:
+        _intentos_fallidos[ip].append(time.time())
+
+
+def _limpiar_intentos(ip: Optional[str]):
+    if ip:
+        _intentos_fallidos.pop(ip, None)
 
 
 # =====================================================================
@@ -203,6 +256,13 @@ def login(body: LoginBody, request: Request):
     identificador = body.identificador.strip().lower()
     ip_cliente = _obtener_ip_real(request)
 
+    if _ip_bloqueada(ip_cliente):
+        raise HTTPException(
+            429,
+            f"Demasiados intentos fallidos desde esta conexion. "
+            f"Espera unos minutos antes de volver a intentar.",
+        )
+
     conn = db.get_connection()
     try:
         with conn.cursor() as cur:
@@ -229,7 +289,10 @@ def login(body: LoginBody, request: Request):
         conn.close()
 
     if not password_ok:
+        _registrar_intento_fallido(ip_cliente)
         raise HTTPException(401, "Correo/usuario o contrasena incorrectos")
+
+    _limpiar_intentos(ip_cliente)
 
     usuario_id, email, username, _, es_admin, activo = fila
     if not activo:

@@ -16,6 +16,7 @@ Endpoint principal:
     POST /webhook/indicators
 """
 
+import os
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,13 +53,30 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS: el frontend React se hostea en un dominio separado (ej. Vercel),
+# CORS: el frontend React se hostea en un dominio separado (Railway),
 # asi que el navegador necesita permiso explicito para llamar a este
-# backend desde ahi. En produccion, reemplaza "*" por el dominio real
-# del frontend para mayor seguridad.
+# backend desde ahi. Restringido al dominio real (via variable de
+# entorno FRONTEND_ORIGINS, separados por coma si hay mas de uno -- ej.
+# produccion + un dominio de preview) en vez de "*", ya que ahora hay
+# cuentas de usuario reales y datos personales de por medio.
+_frontend_origins_env = os.environ.get("FRONTEND_ORIGINS", "").strip()
+if _frontend_origins_env:
+    FRONTEND_ORIGINS = [o.strip() for o in _frontend_origins_env.split(",") if o.strip()]
+else:
+    # Sin configurar: se deja abierto para no romper el desarrollo
+    # local/pruebas, pero bien avisado -- en produccion real hay que
+    # configurar FRONTEND_ORIGINS en Railway con la URL exacta del
+    # frontend (ej. https://ups-control-production.up.railway.app).
+    FRONTEND_ORIGINS = ["*"]
+    logger.warning(
+        "FRONTEND_ORIGINS no configurada: CORS esta abierto a cualquier origen (*). "
+        "Configura esta variable en Railway con la URL real de tu frontend para "
+        "restringir el acceso, ahora que hay cuentas de usuario reales."
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=FRONTEND_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
