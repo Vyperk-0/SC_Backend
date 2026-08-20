@@ -41,6 +41,7 @@ from backtesting import correr_backtest_sobre_filas, calcular_estadisticas
 import db
 from capturas import router as capturas_router
 from usuarios import router as usuarios_router
+from alertas import router as alertas_router, evaluar_y_disparar_alertas
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ups-backend")
@@ -64,6 +65,7 @@ app.add_middleware(
 
 app.include_router(capturas_router)
 app.include_router(usuarios_router)
+app.include_router(alertas_router)
 
 
 @app.on_event("startup")
@@ -230,15 +232,13 @@ SIMBOLOS_ACTIVOS = {
 
 def procesar_senal_para_alerta(evaluacion: ResultadoEvaluacion, niveles: dict):
     """
-    Punto de enganche para las alertas de WhatsApp (CallMeBot).
-    Se implementa en la siguiente fase - por ahora solo loguea.
+    Punto de enganche de las alertas de WhatsApp configurables por
+    usuario (ver alertas.py). Se llama en CADA evaluacion (no solo
+    cuando esta completa) porque una regla de alerta puede pedir un
+    subconjunto de indicadores, no necesariamente los 6 -- el filtrado
+    real pasa adentro de evaluar_y_disparar_alertas().
     """
-    if evaluacion.symbol not in PARES_VIGILADOS:
-        return
-    if not evaluacion.senal_completa:
-        return
-    logger.info(f"[ALERTA PENDIENTE DE CONECTAR] {evaluacion.resumen()} niveles={niveles}")
-    # TODO (fase 5 del roadmap): llamar aca a alertas/whatsapp.py
+    evaluar_y_disparar_alertas(evaluacion, niveles)
 
 
 # =====================================================================
