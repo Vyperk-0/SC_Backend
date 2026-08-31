@@ -22,6 +22,7 @@ tenias):
 
 import os
 import re
+import json
 import logging
 import time
 from collections import defaultdict
@@ -134,6 +135,24 @@ def _crear_tablas(cur):
             user_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
             symbol TEXT NOT NULL,
             PRIMARY KEY (user_id, symbol)
+        );
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS orden_favoritos (
+            user_id INTEGER PRIMARY KEY REFERENCES usuarios(id) ON DELETE CASCADE,
+            modo TEXT NOT NULL DEFAULT 'personalizado',
+            orden TEXT NOT NULL DEFAULT '[]'
+        );
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS perfiles_filtro (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+            nombre TEXT NOT NULL,
+            configuracion TEXT NOT NULL,
+            creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
         );
     """)
 
@@ -434,6 +453,154 @@ def alternar_favorito(body: FavoritoBody, usuario: dict = Depends(usuario_actual
 
 
 # =====================================================================
+# ORDEN DE FAVORITOS (por usuario -- mismo motivo que arriba: si esto
+# se guardara solo en localStorage del navegador, configurar el orden
+# en la PC no se veria en el celular, porque cada dispositivo tiene su
+# propio localStorage separado).
+# =====================================================================
+
+@router.get("/favoritos/orden")
+def obtener_orden_favoritos(usuario: dict = Depends(usuario_actual)):
+    conn = db.get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tablas(cur)
+            cur.execute(
+                "SELECT modo, orden FROM orden_favoritos WHERE user_id = %s;",
+                (usuario["id"],),
+            )
+            fila = cur.fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+
+    if not fila:
+        return {"modo": "personalizado", "orden": []}
+    return {"modo": fila[0], "orden": json.loads(fila[1])}
+
+
+class OrdenFavoritosBody(BaseModel):
+    modo: str
+    orden: list[str] = []
+
+
+@router.put("/favoritos/orden")
+def guardar_orden_favoritos(body: OrdenFavoritosBody, usuario: dict = Depends(usuario_actual)):
+    conn = db.get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tablas(cur)
+            cur.execute(
+                """
+                INSERT INTO orden_favoritos (user_id, modo, orden)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET modo = EXCLUDED.modo, orden = EXCLUDED.orden;
+                """,
+                (usuario["id"], body.modo, json.dumps(body.orden)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"modo": body.modo, "orden": body.orden}
+
+
+# =====================================================================
+# PERFILES DE FILTRO (por usuario -- configuraciones completas de
+# filtros guardadas con un nombre, para no tener que rearmarlas cada
+# vez en la pagina de Senales). La configuracion en si (categorias,
+# timeframes, direccion, nivel de senal, minimo de senales, indicadores,
+# toggles, orden) se guarda tal cual como JSON -- el backend no necesita
+# entender su forma interna, solo guardarla y devolverla.
+# =====================================================================
+
+class PerfilFiltroBody(BaseModel):
+    nombre: str
+    configuracion: dict
+
+
+@router.get("/perfiles-filtro")
+def listar_perfiles_filtro(usuario: dict = Depends(usuario_actual)):
+    conn = db.get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tablas(cur)
+            cur.execute(
+                "SELECT id, nombre, configuracion FROM perfiles_filtro WHERE user_id = %s ORDER BY creado_en ASC;",
+                (usuario["id"],),
+            )
+            filas = cur.fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "perfiles": [
+            {"id": f[0], "nombre": f[1], "configuracion": json.loads(f[2])}
+            for f in filas
+        ]
+    }
+
+
+@router.post("/perfiles-filtro")
+def crear_perfil_filtro(body: PerfilFiltroBody, usuario: dict = Depends(usuario_actual)):
+    conn = db.get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tablas(cur)
+            cur.execute(
+                "INSERT INTO perfiles_filtro (user_id, nombre, configuracion) VALUES (%s, %s, %s) RETURNING id;",
+                (usuario["id"], body.nombre, json.dumps(body.configuracion)),
+            )
+            nuevo_id = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"id": nuevo_id, "nombre": body.nombre, "configuracion": body.configuracion}
+
+
+@router.put("/perfiles-filtro/{perfil_id}")
+def actualizar_perfil_filtro(perfil_id: int, body: PerfilFiltroBody, usuario: dict = Depends(usuario_actual)):
+    conn = db.get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tablas(cur)
+            cur.execute(
+                "UPDATE perfiles_filtro SET nombre = %s, configuracion = %s WHERE id = %s AND user_id = %s;",
+                (body.nombre, json.dumps(body.configuracion), perfil_id, usuario["id"]),
+            )
+            actualizado = cur.rowcount > 0
+        conn.commit()
+    finally:
+        conn.close()
+
+    if not actualizado:
+        raise HTTPException(404, "Perfil no encontrado")
+    return {"id": perfil_id, "nombre": body.nombre, "configuracion": body.configuracion}
+
+
+@router.delete("/perfiles-filtro/{perfil_id}")
+def borrar_perfil_filtro(perfil_id: int, usuario: dict = Depends(usuario_actual)):
+    conn = db.get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tablas(cur)
+            cur.execute(
+                "DELETE FROM perfiles_filtro WHERE id = %s AND user_id = %s;",
+                (perfil_id, usuario["id"]),
+            )
+            borrado = cur.rowcount > 0
+        conn.commit()
+    finally:
+        conn.close()
+
+    if not borrado:
+        raise HTTPException(404, "Perfil no encontrado")
+    return {"ok": True}
+
+
+# =====================================================================
 # PANEL DE ADMINISTRACION (solo cuentas con es_admin = TRUE)
 # =====================================================================
 # Estos endpoints reemplazan el flujo manual de POST /auth/usuarios con
@@ -462,7 +629,7 @@ def listar_usuarios(admin: dict = Depends(admin_actual)):
             {
                 "id": f[0], "email": f[1], "username": f[2],
                 "es_admin": f[3], "activo": f[4], "ultima_ip": f[5],
-                "creado_en": f[6].isoformat(),
+                "creado_en": f[6].isoformat() + "Z",
             }
             for f in filas
         ]
@@ -509,7 +676,7 @@ def crear_usuario_admin(body: CrearUsuarioAdminBody, admin: dict = Depends(admin
 
     return {
         "id": usuario_id, "email": email_limpio, "username": username_limpio,
-        "es_admin": body.es_admin, "creado_en": creado_en.isoformat(),
+        "es_admin": body.es_admin, "creado_en": creado_en.isoformat() + "Z",
     }
 
 

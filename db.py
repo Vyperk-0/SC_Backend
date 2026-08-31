@@ -313,3 +313,34 @@ def obtener_historico_semana():
             indice_por_fecha[clave]["activos"] = simbolos_distintos
 
     return semana
+
+
+def obtener_activaciones_recientes() -> List[dict]:
+    """Para cada combinacion symbol+timeframe+direccion, el momento MAS
+    RECIENTE en que se registro una transicion a completa (tabla
+    eventos_senales). El frontend cruza esto con el estado vivo actual
+    (que ya sabe QUE esta activo ahora mismo) para mostrar desde cuando
+    esta activa cada senal -- en vez de "hace Xs" contado desde el
+    ultimo aviso del EA, que se resetea aunque la senal no haya
+    cambiado en nada."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            _crear_tabla_eventos(cur)
+            cur.execute("""
+                SELECT symbol, timeframe, direccion, MAX(creado_en) AS activada_en
+                FROM eventos_senales
+                GROUP BY symbol, timeframe, direccion;
+            """)
+            filas = cur.fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "symbol": f[0], "timeframe": f[1], "direccion": f[2],
+            "activada_en": f[3].isoformat() + "Z",
+        }
+        for f in filas
+    ]

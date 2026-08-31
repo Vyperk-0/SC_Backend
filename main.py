@@ -1337,6 +1337,33 @@ def obtener_pares_vigilados():
     return {"pares": PARES_VIGILADOS}
 
 
+def _indicadores_activos(indicadores: dict) -> List[str]:
+    """
+    Resume el diccionario crudo de valores de indicadores (el mismo que
+    usa la pagina de Detalle de Activo) en una lista simple de que
+    REGLAS estan mostrando algo ahora mismo -- para poder filtrar en
+    'Senales' por CS/TT/TRVI/TR Wave/TSD/BB Cloud sin tener que pedir
+    el detalle completo de cada simbolo, uno por uno.
+    """
+    def hay_valor(*claves):
+        return any(indicadores.get(c) is not None for c in claves)
+
+    activos = []
+    if hay_valor("cs_magenta", "cs_blanca"):
+        activos.append("CS")
+    if hay_valor("tt_darkgreen", "tt_maroon", "tt_lime", "tt_red"):
+        activos.append("TT")
+    if hay_valor("trvi_valor"):
+        activos.append("TRVI")
+    if hay_valor("trwave_darkgreen", "trwave_maroon", "trwave_lime", "trwave_red"):
+        activos.append("TR Wave")
+    if hay_valor("tsd_aqua", "tsd_yellow"):
+        activos.append("TSD")
+    if hay_valor("bb_inferior", "bb_superior"):
+        activos.append("BB Cloud")
+    return activos
+
+
 @app.get("/estado-vivo")
 def estado_vivo():
     """
@@ -1372,6 +1399,7 @@ def estado_vivo():
             "short_t2": datos["short_t2"],
             "long_t2_completa": datos["long_t2_completa"],
             "short_t2_completa": datos["short_t2_completa"],
+            "indicadores_activos": _indicadores_activos(datos.get("indicadores") or {}),
             "actualizado_hace_segundos": round(segundos),
         })
     return {"pares": resultado}
@@ -1546,6 +1574,20 @@ def historico_diario():
     """
     try:
         return {"semana": db.obtener_historico_semana()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/senales-activadas")
+def senales_activadas():
+    """
+    Para cada symbol+timeframe+direccion, el momento real (fecha y hora)
+    en que se activo la senal por ultima vez -- no "hace cuanto llego
+    el ultimo aviso del EA" (eso se resetea aunque la senal no haya
+    cambiado en nada), sino desde cuando esta activa de verdad.
+    """
+    try:
+        return {"activaciones": db.obtener_activaciones_recientes()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

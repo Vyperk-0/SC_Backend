@@ -169,7 +169,7 @@ def _obtener_stats_historicas(symbol: str, timeframe: str, direccion: str) -> tu
 
 class WhatsappConfigBody(BaseModel):
     numero: str
-    apikey: str
+    apikey: Optional[str] = None  # si viene vacio/ausente, se mantiene la que ya estaba guardada
 
 
 @router.get("/whatsapp/config")
@@ -197,30 +197,48 @@ def obtener_whatsapp_config(usuario: dict = Depends(usuario_actual)):
         "configurado": True,
         "numero": numero,
         "apikey_parcial": apikey[:3] + "•" * max(0, len(apikey) - 3),
-        "actualizado_en": actualizado_en.isoformat(),
+        "actualizado_en": actualizado_en.isoformat() + "Z",
     }
 
 
 @router.put("/whatsapp/config")
 def guardar_whatsapp_config(body: WhatsappConfigBody, usuario: dict = Depends(usuario_actual)):
     numero = body.numero.strip()
-    apikey = body.apikey.strip()
-    if not numero or not apikey:
-        raise HTTPException(400, "Numero y apikey son obligatorios")
+    apikey = (body.apikey or '').strip()
+    if not numero:
+        raise HTTPException(400, "El numero es obligatorio")
 
     conn = db.get_connection()
     try:
         with conn.cursor() as cur:
             _crear_tablas(cur)
-            cur.execute(
-                """
-                INSERT INTO whatsapp_config (user_id, numero, apikey, actualizado_en)
-                VALUES (%s, %s, %s, now())
-                ON CONFLICT (user_id) DO UPDATE
-                SET numero = EXCLUDED.numero, apikey = EXCLUDED.apikey, actualizado_en = now();
-                """,
-                (usuario["id"], numero, apikey),
-            )
+            if apikey:
+                # Vino una apikey nueva -- se actualizan ambos campos.
+                cur.execute(
+                    """
+                    INSERT INTO whatsapp_config (user_id, numero, apikey, actualizado_en)
+                    VALUES (%s, %s, %s, now())
+                    ON CONFLICT (user_id) DO UPDATE
+                    SET numero = EXCLUDED.numero, apikey = EXCLUDED.apikey, actualizado_en = now();
+                    """,
+                    (usuario["id"], numero, apikey),
+                )
+            else:
+                # No vino apikey (el usuario la dejo en blanco a proposito
+                # para no tener que volver a tipearla) -- solo se toca el
+                # numero. Si todavia no existia una config previa con
+                # apikey, esto falla por la columna NOT NULL de apikey,
+                # lo cual es el comportamiento correcto (no se puede crear
+                # una config nueva sin apikey la primera vez).
+                cur.execute(
+                    """
+                    UPDATE whatsapp_config SET numero = %s, actualizado_en = now()
+                    WHERE user_id = %s;
+                    """,
+                    (numero, usuario["id"]),
+                )
+                if cur.rowcount == 0:
+                    raise HTTPException(400, "La apikey es obligatoria la primera vez que configuras WhatsApp")
         conn.commit()
     finally:
         conn.close()
@@ -284,7 +302,7 @@ def _fila_a_dict(fila) -> dict:
         "id": id_, "nombre": nombre, "simbolos": simbolos, "timeframes": timeframes,
         "direcciones": direcciones, "indicadores": indicadores, "requiere_t2": requiere_t2,
         "activa": activa, "plantilla_mensaje": plantilla,
-        "creado_en": creado_en.isoformat(), "actualizado_en": actualizado_en.isoformat(),
+        "creado_en": creado_en.isoformat() + "Z", "actualizado_en": actualizado_en.isoformat() + "Z",
     }
 
 
@@ -454,7 +472,7 @@ def historial_alertas(pagina: int = Query(1, ge=1), usuario: dict = Depends(usua
         {
             "id": f[0], "symbol": f[1], "timeframe": f[2], "direccion": f[3],
             "reglas_confirmadas": f[4], "t2_confirmado": f[5], "mensaje": f[6],
-            "estado": f[7], "enviado_en": f[8].isoformat(),
+            "estado": f[7], "enviado_en": f[8].isoformat() + "Z",
         }
         for f in filas
     ]
